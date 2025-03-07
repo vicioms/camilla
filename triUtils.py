@@ -40,7 +40,6 @@ def compute_taubin_principal_curvatures(taubin_matrices, vert_normals, threshold
     kappa_1 = 3*pc_vals[:,0] - pc_vals[:,1]
     kappa_2 = 3*pc_vals[:,1] - pc_vals[:,0]
     return kappa_1, kappa_2
-
 def compute_triangle_area_vectors(verts, tris):
     """ Return the area vector associated to each triangle.
 
