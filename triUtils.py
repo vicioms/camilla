@@ -1,5 +1,46 @@
 import numpy as np
 import scipy.sparse as sparse
+from numba import njit
+
+def compute_edge_lengths(verts, tris):
+    tri_verts = verts[tris]
+    v0,v1,v2 = tri_verts[:,0], tri_verts[:,1], tri_verts[:,2]
+    edge_10 = v1 - v0
+    edge_20 = v2 - v0
+    edge_21 = v2 - v1
+    return np.stack([np.linalg.norm(edge_21, axis=0),\
+                    np.linalg.norm(edge_20, axis=0),\
+                    np.linalg.norm(edge_10, axis=0)], axis=1)
+@njit
+def compute_taubin_matrices(verts, tris,  vert_normals, tri_areas):
+    M = np.zeros((verts.shape[0], 3, 3))
+    W = np.zeros(verts.shape[0])
+    for tri_idx,tri in enumerate(tris):
+        for a in range(3):
+            a_p = (a-1) % 3
+            a_n = (a+1) % 3
+            normal = vert_normals[tri[a],:]
+            for b in [a_p, a_n]:
+                edge_b_a = verts[tri[b],:] - verts[tri[a],:]
+                tangent_taubin = (np.eye(3) - normal[:,None]*normal[None,:]) @ edge_b_a
+                tangent_taubin /= np.linalg.norm(tangent_taubin)
+                kappa_taubin = 2*(normal*edge_b_a).sum()/np.sum(edge_b_a**2.0)
+                M[tri[a],:,:] += tri_areas[tri_idx]*kappa_taubin*(tangent_taubin[:,None]*tangent_taubin[None,:])
+                W[tri[a]] += tri_areas[tri_idx]
+    return M/W[:,None,None]
+def compute_taubin_principal_curvatures(taubin_matrices, vert_normals, threshold=1e-8):
+    put_minus_flag = np.linalg.norm(np.array([1,0,0])[None,:] -  vert_normals, axis=1) >  np.linalg.norm(np.array([1,0,0])[None,:] +  vert_normals, axis=1)
+    H_vector = np.zeros_like(vert_normals)
+    H_vector[~put_minus_flag, :] = np.array([1,0,0])[None,:] +  vert_normals[~put_minus_flag,:]
+    H_vector[put_minus_flag, :] = np.array([1,0,0])[None,:] -  vert_normals[put_minus_flag,:]
+    H_vector = H_vector/np.linalg.norm(H_vector, axis=1, keepdims=True)
+    Q_matrix = np.eye(3)[None,:,:] - 2*H_vector[:,:,None]*H_vector[:,None,:]
+    reduced_matrix =  np.einsum("aji,ajk,akl->ail", Q_matrix, taubin_matrices, Q_matrix)[:,1:,1:]
+    pc_vals = np.linalg.eigvalsh(reduced_matrix)
+    kappa_1 = 3*pc_vals[:,0] - pc_vals[:,1]
+    kappa_2 = 3*pc_vals[:,1] - pc_vals[:,0]
+    return kappa_1, kappa_2
+
 def compute_triangle_area_vectors(verts, tris):
     """ Return the area vector associated to each triangle.
 
@@ -59,6 +100,13 @@ def compute_vertex_normals_from_area_vectors(num_vertices, tris, tri_area_vector
     np.add.at(vert_normal_vectors, tris[:,1], tri_area_vectors)
     np.add.at(vert_normal_vectors, tris[:,2], tri_area_vectors)
     return vert_normal_vectors/np.linalg.norm(vert_normal_vectors, axis=-1, keepdims=True)
+def compute_vertex_barycentric_areas(verts, tris, tri_areas):
+    barycentric_areas = np.zeros(verts.shape[0])
+    np.add.at(barycentric_areas, tris[:,0], tri_areas)
+    np.add.at(barycentric_areas, tris[:,1], tri_areas)
+    np.add.at(barycentric_areas, tris[:,2], tri_areas)
+    barycentric_areas /= 3.0
+    return barycentric_areas
 def compute_triangle_cotangents(verts, tris, return_areas = False):
     tri_verts = verts[tris]
     v0,v1,v2 = tri_verts[:,0], tri_verts[:,1], tri_verts[:,2]
@@ -113,4 +161,3 @@ def compute_cot_laplacian(verts, tris, normalize_by_areas = True, return_areas =
         return lapl_matrix, barycentric_areas
     else:
         return lapl_matrix
-    
