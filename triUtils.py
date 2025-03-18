@@ -1,6 +1,8 @@
 import numpy as np
 import scipy.sparse as sparse
 from numba import njit
+import networkx as nx
+from scipy.spatial import KDTree
 
 def compute_edge_lengths(verts, tris):
     tri_verts = verts[tris]
@@ -12,7 +14,7 @@ def compute_edge_lengths(verts, tris):
                     np.linalg.norm(edge_20, axis=0),\
                     np.linalg.norm(edge_10, axis=0)], axis=1)
 @njit
-def compute_taubin_matrices(verts, tris,  vert_normals, tri_areas):
+def compute_taubin_matrices(verts, tris, vert_normals, tri_areas):
     M = np.zeros((verts.shape[0], 3, 3))
     W = np.zeros(verts.shape[0])
     for tri_idx,tri in enumerate(tris):
@@ -160,3 +162,44 @@ def compute_cot_laplacian(verts, tris, normalize_by_areas = True, return_areas =
         return lapl_matrix, barycentric_areas
     else:
         return lapl_matrix
+def compute_spatial_graph_clustering(points, values, min_val, max_val, max_distance, num_max_clusters, internal_interval=True):
+    tree = KDTree(points)
+    sparse_distance_matrix = tree.sparse_distance_matrix(tree, max_distance)
+    graph = nx.from_scipy_sparse_array(sparse_distance_matrix)
+    if(internal_interval):
+        graph.remove_nodes_from(np.argwhere((values <= min_val)+(values >= max_val)).flatten())
+    else:
+        graph.remove_nodes_from(np.argwhere((values >= min_val)*(values <= max_val)).flatten())
+    clusters = [ np.array(list(cs)) for cs in sorted(list(nx.connected_components(graph)), key=len, reverse=True )]
+    if(num_max_clusters>0):
+        return clusters[:num_max_clusters]
+    else:
+        return clusters
+def compute_edgelist(tris, with_unique_undirected_edges=False):
+    ii = tris[:,[0,1,2]]
+    jj = tris[:,[1,2,0]]
+    edgelist=  np.stack([ii,jj],axis=0).reshape(2, tris.shape[0]*3)
+    if(with_unique_undirected_edges):
+        np.unique(np.sort(edgelist, axis=0), axis=1)
+    else:
+        return edgelist
+def compute_edgelist_with_opposite_vertex(tris):
+    ii = tris[:,[0,1,2]]
+    jj = tris[:,[1,2,0]]
+    vv = tris[:,[2,0,1]]
+    edgelist =  np.stack([ii,jj, vv],axis=0).reshape(3, tris.shape[0]*3)
+    return edgelist[[0,1,],...], edgelist[2,...]
+def compute_graph_clustering(edgelist, values, min_val, max_val,  internal_interval=True, num_max_clusters=-1, min_num_points=10):
+    if(edgelist.shape[0] == 2):
+        graph = nx.from_edgelist(edgelist.T)
+    else:
+        graph = nx.from_edgelist(edgelist)
+    if(internal_interval):
+        graph.remove_nodes_from(np.argwhere((values <= min_val)+(values >= max_val)).flatten())
+    else:
+        graph.remove_nodes_from(np.argwhere((values >= min_val)*(values <= max_val)).flatten())
+    clusters = [ np.array(list(cs)) for cs in sorted(list(nx.connected_components(graph)), key=len, reverse=True ) if len(cs) >= min_num_points]
+    if(num_max_clusters>0):
+        return clusters[:num_max_clusters]
+    else:
+        return clusters
