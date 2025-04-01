@@ -3,6 +3,7 @@ import scipy.sparse as sparse
 from numba import njit
 import networkx as nx
 from scipy.spatial import KDTree
+import torch
 
 def compute_edge_lengths(verts, tris):
     tri_verts = verts[tris]
@@ -43,29 +44,19 @@ def compute_taubin_principal_curvatures(taubin_matrices, vert_normals, threshold
     kappa_2 = 3*pc_vals[:,1] - pc_vals[:,0]
     return kappa_1, kappa_2
 def compute_triangle_area_vectors(verts, tris):
-    """ Return the area vector associated to each triangle.
-
-    Args:
-        verts (_type_): (V,3) array
-        tris (_type_): (F,3) array
-
-    Returns:
-        _type_: Area vectors (F,3)
-    """
     return 0.5*np.cross(verts[tris[:, 1],:] - verts[tris[:, 0],:],verts[tris[:, 2],:] - verts[tris[:, 0],:])
+def torch_compute_triangle_area_vectors(verts, tris):
+    return 0.5*torch.cross(verts[tris[:, 1],:] - verts[tris[:, 0],:],verts[tris[:, 2],:] - verts[tris[:, 0],:])
 def compute_triangle_normals(verts, tris, return_areas = False):
-    """_summary_
-
-    Args:
-        verts (_type_): _description_
-        tris (_type_): _description_
-        return_areas (bool, optional): _description_. Defaults to False.
-
-    Returns:
-        _type_: _description_
-    """
     area_vecs = compute_triangle_area_vectors(verts, tris)
     areas = np.linalg.norm(area_vecs, axis=-1)
+    if(return_areas):
+        return area_vecs/areas[:,None], areas
+    else:
+        return area_vecs/areas[:,None]
+def torch_compute_triangle_normals(verts, tris, return_areas = False):
+    area_vecs = torch_compute_triangle_area_vectors(verts, tris)
+    areas = torch.linalg.norm(area_vecs, dim=-1)
     if(return_areas):
         return area_vecs/areas[:,None], areas
     else:
@@ -123,6 +114,21 @@ def compute_triangle_cotangents(verts, tris, return_areas = False):
         return cot, areas
     else:
         return cot
+def torch_compute_triangle_cotangents(verts, tris, return_areas = False):
+    tri_verts = verts[tris]
+    v0,v1,v2 = tri_verts[:,0], tri_verts[:,1], tri_verts[:,2]
+    edge_10 = v1 - v0
+    edge_20 = v2 - v0
+    edge_21 = v2 - v1
+    areas = torch.linalg.norm(torch.cross(edge_10, edge_20), dim=1)
+    cot_0 = torch.sum(edge_10*edge_20, dim=1)/areas
+    cot_1 = -torch.sum(edge_10*edge_21, dim=1)/areas
+    cot_2 = torch.sum(edge_20*edge_21, dim=1)/areas
+    cot = torch.stack([cot_0, cot_1, cot_2], dim=1)
+    if(return_areas):
+        return cot, areas
+    else:
+        return cot
 def compute_triangle_angles(verts, tris):
     tri_verts = verts[tris]
     v0,v1,v2 = tri_verts[:,0], tri_verts[:,1], tri_verts[:,2]
@@ -148,6 +154,20 @@ def compute_cot_matrix(verts, tris, return_areas = False):
         return cot_matrix, tri_areas
     else:
         return cot_matrix
+def torch_compute_cot_matrix(verts, tris, return_areas = False):
+    if(return_areas):
+        cot, tri_areas = torch_compute_triangle_cotangents(verts, tris, return_areas=True)
+    else:
+        cot = torch_compute_triangle_cotangents(verts, tris, return_areas=False)
+    ii = tris[:, [1,2,0]]
+    jj = tris[:, [2,0,1]]
+    idx = torch.stack([ii,jj], axis=0).reshape(2, tris.shape[0]*3)
+    cot_matrix =torch.sparse_coo_tensor(idx, cot.flatten(), size=(verts.size(0), verts.size(0)))
+    cot_matrix += cot_matrix.t()
+    if(return_areas):
+        return cot_matrix, tri_areas
+    else:
+        return cot_matrix
 def compute_cot_laplacian(verts, tris, normalize_by_areas = True, return_areas = False):
     cot_matrix, tri_areas = compute_cot_matrix(verts, tris, return_areas=True)
     barycentric_areas = np.zeros(verts.shape[0])
@@ -162,6 +182,7 @@ def compute_cot_laplacian(verts, tris, normalize_by_areas = True, return_areas =
         return lapl_matrix, barycentric_areas
     else:
         return lapl_matrix
+
 def compute_spatial_graph_clustering(points, values, min_val, max_val, max_distance, num_max_clusters, internal_interval=True):
     tree = KDTree(points)
     sparse_distance_matrix = tree.sparse_distance_matrix(tree, max_distance)
