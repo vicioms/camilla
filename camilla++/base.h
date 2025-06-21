@@ -47,8 +47,8 @@ struct float3
 };
 struct int2
 {
-    float x;
-    float y;
+    int x;
+    int y;
 
     int2()
     {
@@ -61,12 +61,16 @@ struct int2
         x = x_;
         y = y_;
     };
+
+    bool operator==(const int2& other) const {
+        return x == other.x && y == other.y;
+    }
 };
 struct int3
 {
-    float x;
-    float y;
-    float z;
+    int x;
+    int y;
+    int z;
 
     int3()
     {
@@ -81,6 +85,10 @@ struct int3
         y = y_;
         z = z_;
     };
+
+    bool operator==(const int3& other) const {
+        return x == other.x && y == other.y && z == other.z;
+    }
 };
 struct box2
 {
@@ -97,10 +105,10 @@ struct box2
     };
 };
 
-static constexpr float2 zero2 = {0.0f,0.0f};
-static constexpr float3 zero3 = {0.0f,0.0f,0.0f};
-static constexpr float2 nan2 = {quiet_nan,quiet_nan};
-static constexpr float3 nan3 = {quiet_nan,quiet_nan,quiet_nan};
+const float2 zero2 = {0.0f,0.0f};
+const float3 zero3 = {0.0f,0.0f,0.0f};
+const float2 nan2 = {quiet_nan,quiet_nan};
+const float3 nan3 = {quiet_nan,quiet_nan,quiet_nan};
 
 
 float3 make_float3(float x_, float y_, float z_)

@@ -3,7 +3,22 @@
 #include <vector>
 #include <functional>
 #include <unordered_map>
+#include <set>
+#include <map>
+#include <unordered_set>
+#include <utility>
+#include <string>
+#include <iostream>
 using namespace std;
+
+namespace std {
+    template <>
+    struct hash<int2> {
+        std::size_t operator()(const int2& k) const {
+            return std::hash<int>()(k.x) ^ (std::hash<int>()(k.y) << 1);
+        }
+    };
+}
 
 const int POLYGON_MAX_NUM_SIDES = 1000;
 
@@ -61,7 +76,8 @@ struct halfedge {
 
     size_t get_reverse_hash() const {
         return hash<int>()(target) ^ (hash<int>()(source) << 1);
-    }
+    };
+
 };
 
 struct polygon {
@@ -164,5 +180,285 @@ struct polygon {
             gradients[target] += delta;
         });
         return success;
+    };
+};
+
+void halfedge_apply_neighbourhood(halfedge* edge,function<void(halfedge*)> func)
+{
+    func(edge);
+        if(edge->twin != nullptr)
+            func(edge->twin);
+        halfedge* current = edge->next;
+        halfedge* current_twin = current->twin;
+        if(current_twin != nullptr)
+        {
+            while(true)
+            {
+                func(current);
+                func(current_twin);
+
+                
+                current = current_twin->next;
+                if(current == nullptr)
+                    break;
+                current_twin =  current->twin;
+                if(current_twin == nullptr)
+                    break;
+                if(current_twin == edge)
+                    break;
+            };
+        }
+        else
+        {
+            func(current);
+        }
+        current = edge->prev;
+        current_twin = current->twin;
+        if(current_twin != nullptr)
+        {
+            while(true)
+            {
+                func(current);
+                func(current_twin);
+                current = current_twin->prev;
+                if(current == nullptr)
+                    break;
+                current_twin =  current->twin;
+                if(current_twin == nullptr)
+                    break;
+                if(current_twin == edge)
+                    break;
+            };
+        }
+        else
+        {
+            func(current);
+        }
+};
+
+
+template<typename acc_type>
+void halfedge_accumulate_target_vertex_neighbourhood(halfedge* edge,function<acc_type(int,int)> func, acc_type& value)
+{
+    
+    int target = edge->target;
+    halfedge* current = edge->next;
+    halfedge* current_twin = current->twin;
+    if(current_twin != nullptr)
+    {
+        while(true)
+        {
+            value += func(target, current->target);
+            current = current_twin->next;
+            if(current == nullptr)
+                break;
+            current_twin =  current->twin;
+            if(current_twin == nullptr)
+                break;
+            if(current_twin == edge)
+                break;
+        };
+    }
+    else
+    {
+        value += func(target, current->target);
+    };
+};
+
+template<typename acc_type>
+void halfedge_accumulate_source_vertex_neighbourhood(halfedge* edge,function<acc_type(int,int)> func, acc_type& value)
+{
+    
+    int source = edge->source;
+    halfedge* current = edge->prev;
+    halfedge* current_twin = current->twin;
+    if(current_twin != nullptr)
+    {
+        while(true)
+        {
+            value += func(source, current->source);
+            current = current_twin->prev;
+            if(current == nullptr)
+                break;
+            current_twin =  current->twin;
+            if(current_twin == nullptr)
+                break;
+            if(current_twin == edge)
+                break;
+        };
+    }
+    else
+    {
+        value += func(source, current->source);
+    };
+};
+
+void load_polygons(vector<vector<int>> polygons, vector<polygon*>& result, vector<polygon*>& boundaries)
+{
+    result.reserve(polygons.size());
+
+    polygon* pols = (polygon*)malloc(polygons.size()*sizeof(polygon));
+
+    unordered_map<int2, int> edge_to_poly;
+    unordered_map<int2, int> edge_to_index;
+    unordered_map<int2,int2> edge_to_prev;
+    unordered_map<int2,int2> edge_to_next;
+    int polygon_index = 0;
+    int halfedge_index = 0;
+    map<int,int2> polygon_to_root; 
+    for(vector<int> polygon : polygons)
+    {
+        pols[polygon_index].root = nullptr;
+        result.push_back(&pols[polygon_index]);
+        int n_sides = polygon.size();
+        int2 prev_edge = {-1,-1};
+        int2 first_edge;
+        int2 last_edge;
+        for(int i = 0; i < n_sides; i++)
+        {
+            int next_i = pmod((i+1), n_sides);
+            int2 edge = {polygon[i], polygon[next_i]};
+            if(i == 0)
+                first_edge = edge;
+            if(i == n_sides - 1)
+                last_edge = edge;                
+            edge_to_poly[edge] = polygon_index;
+            edge_to_index[edge] = halfedge_index;
+            if(i>0)
+                edge_to_prev[edge] = prev_edge;
+                edge_to_next[prev_edge] = edge;
+            prev_edge = edge;
+            halfedge_index += 1;
+        };
+        edge_to_prev[first_edge] = last_edge;
+        edge_to_next[last_edge] = first_edge;
+        polygon_to_root[polygon_index] = first_edge;
+        polygon_index++;
+    };
+    
+    int num_half_edges = edge_to_poly.size();
+    halfedge* halfedges = (halfedge*)malloc(sizeof(halfedge)*num_half_edges);
+    vector<int2> boundary_edges;
+    for(auto const& edge_and_index : edge_to_index)
+    {
+        
+        int2 edge = edge_and_index.first;
+        int index = edge_and_index.second;
+        int polygon_index = edge_to_poly[edge];
+                
+        halfedges[index].source = edge.x;
+        halfedges[index].target = edge.y;
+        int2 twin_edge = {edge.y, edge.x};
+        int twin_index = -1;
+        if(edge_to_index.count(twin_edge))
+            twin_index = edge_to_index[twin_edge];
+        if(twin_index != -1)
+        {
+            halfedges[index].twin = &halfedges[twin_index];
+        }
+        else
+        {
+            boundary_edges.push_back(edge);
+        }
+        int next_index =  edge_to_index[edge_to_next[edge]];
+        int prev_index =  edge_to_index[edge_to_prev[edge]];
+        halfedges[index].next = &halfedges[next_index];
+        halfedges[index].prev = &halfedges[prev_index];
+    };
+    for(auto const& poly_and_edge : polygon_to_root)
+    {
+        result[poly_and_edge.first]->root = &halfedges[edge_to_index[poly_and_edge.second]];
+    };
+    
+    vector<int2> external_edges;
+    for(auto edge : boundary_edges)
+    {
+        external_edges.push_back({edge.y, edge.x});
+    }
+
+    int num_boundary_edges = external_edges.size();
+    halfedge* external_halfedges = (halfedge*)malloc(sizeof(halfedge)*num_boundary_edges);
+    unordered_map<int2,halfedge*> external_edge_to_halfedge;
+    int external_halfedges_index = 0;
+    for(int2 external_edge : external_edges)
+    {
+        int2 boundary_edge = {external_edge.y, external_edge.x};
+        int index = edge_to_index[boundary_edge];
+        halfedge& boundary_halfedge = halfedges[index];
+        halfedge& external_halfedge = external_halfedges[external_halfedges_index];
+        external_halfedge.twin = &boundary_halfedge;
+        boundary_halfedge.twin = &external_halfedge;
+        external_halfedge.source = boundary_halfedge.target;
+        external_halfedge.target = boundary_halfedge.source;
+        external_edge_to_halfedge[int2(external_halfedge.source, external_halfedge.target)] = &external_halfedge;
+        external_halfedges_index += 1;
+    };
+
+    vector<vector<int2>> external_loops;
+    vector<int2> current_loop;
+    int2 current_edge;
+    while(external_edges.size()>0)
+    {
+        if(current_loop.size() == 0)
+        {
+            current_edge = external_edges.front();
+            external_edges.erase(external_edges.begin());
+            current_loop.push_back(current_edge);
+        }
+        else
+        {
+            bool found_something = false;
+            auto it = external_edges.begin();
+            while (it != external_edges.end()) {
+                if (it->x == current_edge.y) {
+                    current_loop.push_back(*it);
+                    current_edge = *it; // update current_edge to continue the chain
+                    //cout << current_edge.first.x << " " << current_edge.first.y << endl;
+                    it = external_edges.erase(it); // erase and get new iterator
+                    found_something = true;
+                    break;
+                } else {
+                    ++it;
+                }
+            };
+            if(found_something == false)
+            {
+                external_loops.push_back(current_loop);
+                current_loop.clear();
+            };
+        };
+    };
+    if(current_loop.size()>0)
+    {
+        external_loops.push_back(current_loop);
+    };
+    
+    for(vector<int2> loop : external_loops)
+    {
+        halfedge* root = nullptr;
+        int2 prev_edge;
+        int2 first_edge;
+        int2 last_edge;
+        for(int i =0; i < loop.size(); i++)
+        {
+            int2 edge = loop[i];
+            if(root == nullptr)
+                root = external_edge_to_halfedge[edge];
+            if(i == 0)
+                first_edge = edge;
+            if(i == loop.size()-1)
+                last_edge = edge;
+            if(i>0)
+            {
+                external_edge_to_halfedge[edge]->prev = external_edge_to_halfedge[prev_edge];
+                external_edge_to_halfedge[prev_edge]->next = external_edge_to_halfedge[edge];
+            };
+            prev_edge = edge;
+        };
+        external_edge_to_halfedge[first_edge]->prev = external_edge_to_halfedge[last_edge];
+        external_edge_to_halfedge[last_edge]->next = external_edge_to_halfedge[first_edge];
+        polygon* loop_polygon = new polygon();
+        loop_polygon->root = root;
+        boundaries.push_back(loop_polygon);
     };
 };

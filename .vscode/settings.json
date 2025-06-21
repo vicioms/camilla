@@ -71,6 +71,7 @@
         "sstream": "cpp",
         "cfenv": "cpp",
         "typeindex": "cpp",
-        "set": "cpp"
+        "set": "cpp",
+        "bitset": "cpp"
     }
 }
