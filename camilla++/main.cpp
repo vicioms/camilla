@@ -76,8 +76,32 @@ void read_basic_ply(string filename, vector<float3>& vertices, vector<int3>& tri
     ifs.close();
 } 
 
-
 int main()
+{
+    vector<float3> vertices;
+    vector<float3> gradients;
+    vertices.emplace_back(0.0f, 0.0f,0.0f);
+    vertices.emplace_back(1.0f, 0.0f,0.0f);
+    vertices.emplace_back(1.0f, 1.0f,0.0f);
+    vertices.emplace_back(0.0f, 1.0f,0.0f);
+    for(int i = 0; i < vertices.size(); i++)
+    {
+        gradients.emplace_back(0.0f,0.0f,0.0f);
+    };
+    vector<vector<int>> cty;
+    cty.push_back({0,1,2,3});
+    vector<polygon*> polygons;
+    vector<polygon*> boundaries;
+    load_polygons(cty, polygons, boundaries);
+    polygons[0]->area_grad(vertices, gradients);
+    for(float3 grad : gradients)
+    {
+        cout << grad.x << " " << grad.y << " " << grad.z << endl; 
+    };
+    return 0;
+};
+
+int tri_main()
 {
     vector<float3> vertices;
     vector<int3> triangles;
@@ -98,10 +122,12 @@ int main()
    load_polygons(polygons_connectivity, polygons, boundaries);
    for(auto ptr : boundaries)
    {
-        ptr->apply_edges([](halfedge* e){
-            cout << e->source << " " << e->target << endl;});   
+        float3 area_vector = ptr->area_vector(vertices);
+        cout << area_vector.x << " " << area_vector.y << " " << area_vector.z << endl;
+        //ptr->apply_edges([](halfedge* e){
+        //    cout << e->source << " " << e->target << endl;});   
         cout << "---------------" << endl;
-   }
+   };
    //for(auto ptr : polygons)
    //{
    //     ptr->apply_edges([](halfedge* e){
@@ -111,4 +137,5 @@ int main()
    //     });        
    //     cout << "---------------" << endl;
    //}
+   return 0;
 };

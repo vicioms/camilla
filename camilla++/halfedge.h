@@ -137,24 +137,23 @@ struct polygon {
         }, result);
         return success ? result * 0.5f : nan3;
     };
-    //A = 0.5*|| \sum_i v_i x v_{i+1} ||
     bool area_grad(const vector<float3>& vertices,  vector<float3>& gradients)
     {
         float3 area_v = this->area_vector(vertices);
         if(area_v == nan3)
             return false;
-        bool success = this->apply_edges([&vertices, &gradients, area_v](halfedge* e) {
+        float3 normal_v = normalize(area_v);
+        bool success = this->apply_edges([&vertices, &gradients, normal_v](halfedge* e) {
             int source = e->source;
             int target = e->target;
-            float3 source_grad;
-            float3 target_grad;
-            gradients[source] += source_grad;
-            gradients[target] += target_grad;
-    
+            float3 normal_cross_source = cross(normal_v, vertices[source]);
+            float3 normal_cross_target = cross(normal_v, vertices[target]);
+            gradients[source] += -0.5*normal_cross_target;
+            gradients[target] += 0.5*normal_cross_source;
         });
         return success;
     };
-
+    
     float perimeter(const vector<float3>& vertices) const {
         float result = 0.0f;
         bool success = this->accumulate_edges<float>([&vertices](halfedge* e) {
@@ -162,7 +161,6 @@ struct polygon {
         }, result);
         return success ? result : 0.0f;
     }
-
     bool perimeter_grad(const vector<float3>& vertices,  vector<float3>& gradients)
     {
         float perimeter = this->perimeter(vertices);
@@ -236,7 +234,6 @@ void halfedge_apply_neighbourhood(halfedge* edge,function<void(halfedge*)> func)
         }
 };
 
-
 template<typename acc_type>
 void halfedge_accumulate_target_vertex_neighbourhood(halfedge* edge,function<acc_type(int,int)> func, acc_type& value)
 {
@@ -293,11 +290,11 @@ void halfedge_accumulate_source_vertex_neighbourhood(halfedge* edge,function<acc
     };
 };
 
-void load_polygons(vector<vector<int>> polygons, vector<polygon*>& result, vector<polygon*>& boundaries)
+void load_polygons(vector<vector<int>> list_of_polygons, vector<polygon*>& polygons, vector<polygon*>& boundaries)
 {
-    result.reserve(polygons.size());
+    polygons.reserve(list_of_polygons.size());
 
-    polygon* pols = (polygon*)malloc(polygons.size()*sizeof(polygon));
+    polygon* pols = (polygon*)malloc(list_of_polygons.size()*sizeof(polygon));
 
     unordered_map<int2, int> edge_to_poly;
     unordered_map<int2, int> edge_to_index;
@@ -306,10 +303,10 @@ void load_polygons(vector<vector<int>> polygons, vector<polygon*>& result, vecto
     int polygon_index = 0;
     int halfedge_index = 0;
     map<int,int2> polygon_to_root; 
-    for(vector<int> polygon : polygons)
+    for(vector<int> polygon : list_of_polygons)
     {
         pols[polygon_index].root = nullptr;
-        result.push_back(&pols[polygon_index]);
+        polygons.push_back(&pols[polygon_index]);
         int n_sides = polygon.size();
         int2 prev_edge = {-1,-1};
         int2 first_edge;
@@ -367,7 +364,7 @@ void load_polygons(vector<vector<int>> polygons, vector<polygon*>& result, vecto
     };
     for(auto const& poly_and_edge : polygon_to_root)
     {
-        result[poly_and_edge.first]->root = &halfedges[edge_to_index[poly_and_edge.second]];
+        polygons[poly_and_edge.first]->root = &halfedges[edge_to_index[poly_and_edge.second]];
     };
     
     vector<int2> external_edges;
