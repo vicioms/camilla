@@ -459,3 +459,30 @@ void load_polygons(vector<vector<int>> list_of_polygons, vector<polygon*>& polyg
         boundaries.push_back(loop_polygon);
     };
 };
+
+void create_quad_chain(int num_quads, float width, float height, vector<vector<int>>& polys, vector<float3>& vertices)
+{
+    int num_tot_vertices = 2*(num_quads+1);
+    int num_upper_vertices = num_quads + 1;
+    polys.reserve(num_quads);
+    vertices.reserve(num_tot_vertices);
+    for(int i = 0; i < num_tot_vertices; i++)
+    {
+        vertices.push_back({0.0f,0.0f,0.0f});
+    }
+    for(int i =0; i < num_quads; i++)
+    {
+        int upper_left = i;
+        int upper_right = i + 1;
+        int lower_left = i + num_quads + 1;
+        int lower_right = i + num_quads + 2;
+        polys.push_back({lower_left, lower_right, upper_right, upper_left});
+        vertices[upper_left] = {i*width, height, 0.0f};
+        vertices[lower_left] = {i*width, 0.0, 0.0f};
+    }
+    vertices[num_quads] = {num_quads*width, height, 0.0f};
+    vertices[2*num_quads + 1] = {num_quads*width, 0.0, 0.0f};
+}
+
+
+

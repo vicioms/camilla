@@ -78,6 +78,18 @@ void read_basic_ply(string filename, vector<float3>& vertices, vector<int3>& tri
 
 int main()
 {
+    int num_quads = 5;
+    vector<vector<int>> quads_conn;
+    vector<float3> vertices;
+    create_quad_chain(num_quads, 1.0, 16.0, quads_conn, vertices);
+    vector<polygon*> polygons;
+    vector<polygon*> boundaries;
+    load_polygons(quads_conn, polygons, boundaries);
+    return 0;
+};
+
+int custom_main()
+{
     vector<float3> vertices;
     vector<float3> gradients;
     vertices.emplace_back(0.0f, 0.0f,0.0f);
