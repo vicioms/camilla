@@ -153,6 +153,23 @@ struct polygon {
         });
         return success;
     };
+    bool area_elasticity_grad(const vector<float3>& vertices,  vector<float3>& gradients, float k, float a0)
+    {
+        float3 area_v = this->area_vector(vertices);
+        if(area_v == nan3)
+            return false;
+        float area = length(area_v);
+        float3 normal_v = normalize(area_v);
+        bool success = this->apply_edges([&vertices, &gradients, normal_v, area, k, a0](halfedge* e) {
+            int source = e->source;
+            int target = e->target;
+            float3 normal_cross_source = cross(normal_v, vertices[source]);
+            float3 normal_cross_target = cross(normal_v, vertices[target]);
+            gradients[source] += (-0.5*k*(area-a0))*normal_cross_target;
+            gradients[target] += (0.5*k*(area-a0))*normal_cross_source;
+        });
+        return success;
+    };
     
     float perimeter(const vector<float3>& vertices) const {
         float result = 0.0f;
@@ -179,7 +196,113 @@ struct polygon {
         });
         return success;
     };
+    bool perimeter_tension_grad(const vector<float3>& vertices,  vector<float3>& gradients, float gamma)
+    {
+        float perimeter = this->perimeter(vertices);
+        if(perimeter < 0)
+            return false;
+        bool success = this->apply_edges([&vertices, &gradients, perimeter, gamma](halfedge* e) {
+            int source = e->source;
+            int target = e->target;
+            
+            const float3& a = vertices[source];
+            const float3& b = vertices[target];
+
+            float3 delta = (b-a)/perimeter;
+            gradients[source] -= gamma*delta;
+            gradients[target] += gamma*delta;
+        });
+        return success;
+    };
+    bool perimeter_elasticity_grad(const vector<float3>& vertices,  vector<float3>& gradients, float k, float p0)
+    {
+        float perimeter = this->perimeter(vertices);
+        if(perimeter < 0)
+            return false;
+        bool success = this->apply_edges([&vertices, &gradients, perimeter, k, p0](halfedge* e) {
+            int source = e->source;
+            int target = e->target;
+            
+            const float3& a = vertices[source];
+            const float3& b = vertices[target];
+
+            float3 delta = (b-a)/perimeter;
+            gradients[source] -= k*delta*(perimeter-p0);
+            gradients[target] += k*delta*(perimeter-p0);
+        });
+        return success;
+    };
 };
+
+
+void halfedge_assign_prev(halfedge* edge, halfedge* new_prev)
+{
+    if(edge != nullptr)
+    {
+        halfedge* old_prev = edge->prev;
+        edge->prev = new_prev;
+        if(new_prev != nullptr)
+        {
+            new_prev->next = edge;
+        }
+    }
+};
+void halfedge_assign_next(halfedge* edge, halfedge* new_next)
+{
+    if(edge != nullptr)
+    {
+        halfedge* old_next = edge->next;
+        edge->next = new_next;
+        if(new_next != nullptr)
+        {
+            new_next->prev = edge;
+        }
+    }
+};
+void halfedge_assign_twins(halfedge* edge_1, halfedge* edge_2)
+{
+    if(edge_1 != nullptr && edge_2 != nullptr)
+    {
+        edge_1->twin = edge_2;
+        edge_2->twin = edge_1;
+    }
+}
+void halfedge_split(halfedge* old, int new_vertex_index)
+{
+    halfedge* old_twin = old->twin;
+    halfedge* new_edges = (halfedge*)malloc(4*sizeof(halfedge));
+    new_edges[0].source = old->source;
+    new_edges[0].target = new_vertex_index;
+    new_edges[1].source = new_vertex_index;
+    new_edges[1].target = old->target;
+    new_edges[2].source = old->target;
+    new_edges[2].target = new_vertex_index;
+    new_edges[3].source = new_vertex_index;
+    new_edges[3].target = old->source;
+
+    halfedge_assign_prev(&new_edges[0], old->prev);
+    halfedge_assign_next(&new_edges[0], &new_edges[1]);
+    halfedge_assign_next(&new_edges[1], old->next);
+    if(old_twin != nullptr)
+    {
+        halfedge_assign_prev(&new_edges[2], old_twin->prev);
+    }
+    halfedge_assign_next(&new_edges[2], &new_edges[3]);
+    if(old_twin != nullptr)
+    {
+        halfedge_assign_next(&new_edges[3], old_twin->next);
+    }
+    halfedge_assign_twins(&new_edges[0], &new_edges[3]);
+    halfedge_assign_twins(&new_edges[1], &new_edges[2]);
+
+    new_edges[0].parent = old->parent;
+    new_edges[1].parent = old->parent;    
+};
+void halfedge_collapse(halfedge* old,  int new_vertex_index)
+{
+
+}
+
 
 void halfedge_apply_neighbourhood(halfedge* edge,function<void(halfedge*)> func)
 {
