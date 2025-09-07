@@ -72,6 +72,10 @@
         "cfenv": "cpp",
         "typeindex": "cpp",
         "set": "cpp",
-        "bitset": "cpp"
+        "bitset": "cpp",
+        "__tree": "cpp",
+        "complex": "cpp",
+        "print": "cpp",
+        "stack": "cpp"
     }
 }

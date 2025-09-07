@@ -1,3 +1,5 @@
+
+
 #pragma once
 #include <cmath>
 #include <limits>
@@ -14,6 +16,16 @@ inline int pmod(int i, int n)
 inline float fpmod(float x, float l)
 {
     return fmodf(fmodf(x,l) + l, l);
+};
+
+inline int pack(int r, int c, int dim)
+{
+    return r*dim+c;
+};
+inline void unpack(int idx, int dim, int& r, int& c)
+{
+    r = idx / dim;
+    c = pmod(idx, dim);
 };
 
 struct float2
@@ -124,51 +136,55 @@ float3 make_float3(float x_, float y_, float z_)
 };
 
 
+// float2 operators
 inline float2 operator+(const float2& a, const float2& b) {
     return float2(a.x - b.x, a.y - b.y);
 };
 inline float2 operator-(const float2& a, const float2& b) {
     return float2(a.x + b.x, a.y + b.y);
 };
-inline float2 midpoint(const float2& a, const float2& b)
-{
-    return float2((a.x+b.x)/2.0f, (a.y+b.y)/2.0f);
+inline float2 operator*(const float2& a, const float s) {
+    return float2(a.x * s, a.y * s);
 };
-inline float dot(const float2& u, const float2& v)
-{
-    return u.x*v.x + u.y*v.y;
+inline float2 operator*(const float s, const float2& a) {
+    return a * s;
 };
-inline float cross(const float2& u, const float2& v)
-{
-    return u.x*v.y - u.y*v.x;
+inline float2 operator/(const float2& a, const float s) {
+    float inv = 1.0f / s;
+    return a * inv;
 };
-inline float3 operator+(const float3& a, const float3& b) {
-    return float3(a.x + b.x, a.y + b.y, a.z + b.z);
-};
-inline float3& operator+=(float3& a, const float3& b) {
+
+inline float2& operator+=(float2& a, const float2& b) {
     a.x += b.x;
     a.y += b.y;
-    a.z += b.z;
+    return a;
+};
+inline float2& operator-=(float2& a, const float2& b) {
+    a.x -= b.x;
+    a.y -= b.y;
+    return a;
+};
+inline float2& operator*=(float2& a, const float s) {
+    a.x *= s;
+    a.y *= s;
+    return a;
+};
+inline float2& operator/=(float2& a, const float s) {
+    float inv = 1.0f / s;
+    a *= inv;
     return a;
 };
 
+
+// float3 operators
+inline float3 operator+(const float3& a, const float3& b) {
+    return float3(a.x + b.x, a.y + b.y, a.z + b.z);
+};
 inline float3 operator-(const float3& a, const float3& b) {
     return float3(a.x - b.x, a.y - b.y, a.z - b.z);
 };
-inline float3& operator-=(float3& a, const float3& b) {
-    a.x -= b.x;
-    a.y -= b.y;
-    a.z -= b.z;
-    return a;
-};
 inline float3 operator*(const float3& a, const float s) {
     return float3(a.x * s, a.y * s, a.z * s);
-};
-inline float3& operator*=(float3& a, const float s) {
-    a.x *= s;
-    a.y *= s;
-    a.z *= s;
-    return a;
 };
 inline float3 operator*(const float s, const float3& a) {
     return a * s;
@@ -176,6 +192,25 @@ inline float3 operator*(const float s, const float3& a) {
 inline float3 operator/(const float3& a, const float s) {
     float inv = 1.0f / s;
     return a * inv;
+};
+
+inline float3& operator+=(float3& a, const float3& b) {
+    a.x += b.x;
+    a.y += b.y;
+    a.z += b.z;
+    return a;
+};
+inline float3& operator-=(float3& a, const float3& b) {
+    a.x -= b.x;
+    a.y -= b.y;
+    a.z -= b.z;
+    return a;
+};
+inline float3& operator*=(float3& a, const float s) {
+    a.x *= s;
+    a.y *= s;
+    a.z *= s;
+    return a;
 };
 inline float3& operator/=(float3& a, const float s) {
     float inv = 1.0f / s;
@@ -186,6 +221,79 @@ inline bool operator==(const float3& a, const float3& b)
 {
     return (a.x == b.x) && (a.y == b.y) && (a.z == b.z);
 }
+
+
+// useful float2 funcs
+
+inline float2 midpoint(const float2& a, const float2& b)
+{
+    return float2((a.x+b.x)/2.0f, (a.y+b.y)/2.0f);
+};
+inline float dot(const float2& u, const float2& v)
+{
+    return u.x*v.x + u.y*v.y;
+};
+inline float length(const float2& a) {
+    return sqrtf(dot(a, a));
+};
+inline float cross(const float2& u, const float2& v)
+{
+    return u.x*v.y - u.y*v.x;
+};
+inline float shoelace_formula(float2* p, int n)
+{
+    float s = 0;
+    for(int i = 0; i < n; i++)
+    {
+        int i_next = pmod(i+1,n);
+        s += p[i].x*p[i_next].y - p[i].y * p[i_next].x;
+    };
+    return 0.5*s;
+}
+inline float quad_area_signed(const float2& v1, const float2& v2, const float2& v3, const float2& v4)
+{
+    float s = v1.x*v2.y - v1.y*v2.x
+            + v2.x*v3.y - v2.y*v3.x
+            + v3.x*v4.y - v3.y*v4.x
+            + v4.x*v1.y - v4.y*v1.x;
+    return 0.5f * s;
+};
+inline float tri_area_signed(const float2& v1, const float2& v2, const float2& v3)
+{
+    float s = v1.x*v2.y - v1.y*v2.x
+            + v2.x*v3.y - v2.y*v3.x
+            + v3.x*v1.y - v3.y*v1.x;
+    return 0.5f * s;
+};
+inline float quad_area(const float2& v1, const float2& v2, const float2& v3, const float2& v4)
+{
+    return 0.5*fabsf(quad_area_signed(v1,v2,v3,v4));
+}
+inline float2 normalize(const float2& a) {
+    return a / length(a);
+};
+inline bool inside_circumcircle(const float2& a, const float2& b, const float2& c, const float2& p)
+{
+    //assumes ccw orientation of a, b, c
+    float a_1 = a.x - p.x;
+    float a_2 = a.y - p.y;
+    float a_3 = a_1*a_1 + a_2*a_2;
+    float b_1 = b.x - p.x;
+    float b_2 = b.y - p.y;
+    float b_3 = b_1*b_1 + b_2*b_2;
+    float c_1 = c.x - p.x;
+    float c_2 = c.y - p.y;
+    float c_3 = c_1*c_1 + c_2*c_2;
+
+    float det = a_1*(b_2*c_3 - b_3*c_2) -a_2*(b_1*c_3 - c_1*b_3) + a_3*(b_1*c_2 - c_1*b_2);
+    return det > 0;
+};
+inline bool is_right_of(const float2& x, const float2& source, const float2& target)
+{
+    return cross(x - source, target-source) > 0;
+};
+
+// useful float3 funcs
 inline float3 cross(const float3& u, const float3& v)
 {
     return float3(u.y*v.z - u.z*v.y,
@@ -221,23 +329,5 @@ inline float3 midpoint(const float3& a, const float3& b)
 {
     return float3((a.x+b.x)/2.0f, (a.y+b.y)/2.0f, (a.z+b.z)/2.0f);
 };
-inline bool inside_circumcircle(const float2& a, const float2& b, const float2& c, const float2& p)
-{
-    //assumes ccw orientation of a, b, c
-    float a_1 = a.x - p.x;
-    float a_2 = a.y - p.y;
-    float a_3 = a_1*a_1 + a_2*a_2;
-    float b_1 = b.x - p.x;
-    float b_2 = b.y - p.y;
-    float b_3 = b_1*b_1 + b_2*b_2;
-    float c_1 = c.x - p.x;
-    float c_2 = c.y - p.y;
-    float c_3 = c_1*c_1 + c_2*c_2;
 
-    float det = a_1*(b_2*c_3 - b_3*c_2) -a_2*(b_1*c_3 - c_1*b_3) + a_3*(b_1*c_2 - c_1*b_2);
-    return det > 0;
-};
-inline bool is_right_of(const float2& x, const float2& source, const float2& target)
-{
-    return cross(x - source, target-source) > 0;
-};
+

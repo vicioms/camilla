@@ -76,15 +76,89 @@ void read_basic_ply(string filename, vector<float3>& vertices, vector<int3>& tri
     ifs.close();
 } 
 
+const int N_gl = 5;
+
+const float s_gl_01[N_gl] = {
+    0.046910077030668,
+    0.230765344947158,
+    0.5,
+    0.769234655052841,
+    0.953089922969332
+};
+
+const double w_gl_01[N_gl] = {
+    0.118463442528095,
+    0.239314335249683,
+    0.284444444444444,
+    0.239314335249683,
+    0.118463442528095
+};
+
+
+float adhesion_helper_func(float d2, float d02)
+{
+    float ratio_squares = (d02/d2);
+    float ratio_squares_squared = ratio_squares*ratio_squares;
+    return -(2/d2)*ratio_squares_squared*(2*ratio_squares_squared - 1.0f);
+};
+
 int main()
 {
-    int num_quads = 5;
-    vector<vector<int>> quads_conn;
-    vector<float3> vertices;
-    create_quad_chain(num_quads, 1.0, 16.0, quads_conn, vertices);
-    vector<polygon*> polygons;
-    vector<polygon*> boundaries;
-    load_polygons(quads_conn, polygons, boundaries);
+    float x0 = -0.1;
+    float y0 = 0.1;
+    float dx = 0.5;
+    float dy = 1.0;
+    float L = 2.0;
+
+    float d0 = 0.2;
+
+    float dt = 0.01;
+
+    float tension = 0.01;
+
+    ofstream file;
+    file.open("test.txt");
+    for(int i = 0; i < 100000; i++)
+    {
+        file << x0 << " " << y0 << " " << dx << " " << dy << " " << L << endl;
+        float F_x0 = 0.0;
+        float F_y0 = 0.0;
+        float F_dx = 0.0;
+        float F_dy = 0.0;
+        float F_L = 0.0;
+        for(int k_1 = 0; k_1 < N_gl; k_1++)
+        {
+            for(int k_2 = 0; k_2 < N_gl; k_2++)
+            {
+                float delta_x = (x0 + dx*s_gl_01[k_1] - s_gl_01[k_2]*L);
+                float delta_y = y0 + dy*s_gl_01[k_1];
+                float d2 =  delta_x*delta_x + delta_y*delta_y;
+                float integrand = -adhesion_helper_func(d2, d0*d0)*w_gl_01[k_1]*w_gl_01[k_2];
+                F_x0 += delta_x*integrand;
+                F_y0 += delta_y*integrand;
+                F_dx += s_gl_01[k_1]*delta_x*integrand;
+                F_dy += s_gl_01[k_1]*delta_y*integrand;
+                F_L  += (-s_gl_01[k_2])*(delta_x*integrand);
+            }
+        };
+
+        x0 += dt*F_x0;
+        y0 += dt*F_y0;
+        dx += dt*(F_dx - tension*dx/(sqrtf(dx*dx+dy*dy)));
+        dy += dt*(F_dy - tension*dy/(sqrtf(dx*dx+dy*dy)));
+        L += dt*(F_L - tension);
+    };
+    file.close();
+
+
+
+    //int num_quads = 5;
+    //vector<vector<int>> quads_conn;
+    //vector<float3> vertices;
+    //create_quad_chain(num_quads, 1.0, 16.0, quads_conn, vertices);
+    //vector<polygon*> polygons;
+    //vector<polygon*> boundaries;
+    //load_polygons(quads_conn, polygons, boundaries);
     return 0;
 };
 

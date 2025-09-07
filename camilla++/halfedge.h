@@ -1,5 +1,5 @@
 #pragma once
-#include "base.h"
+#include "../generic.h"
 #include <vector>
 #include <functional>
 #include <unordered_map>
