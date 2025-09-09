@@ -1,5 +1,3 @@
-
-
 #pragma once
 #include <cmath>
 #include <limits>
@@ -17,7 +15,6 @@ inline float fpmod(float x, float l)
 {
     return fmodf(fmodf(x,l) + l, l);
 };
-
 inline int pack(int r, int c, int dim)
 {
     return r*dim+c;
@@ -138,10 +135,10 @@ float3 make_float3(float x_, float y_, float z_)
 
 // float2 operators
 inline float2 operator+(const float2& a, const float2& b) {
-    return float2(a.x - b.x, a.y - b.y);
+    return float2(a.x + b.x, a.y + b.y);
 };
 inline float2 operator-(const float2& a, const float2& b) {
-    return float2(a.x + b.x, a.y + b.y);
+    return float2(a.x - b.x, a.y - b.y);
 };
 inline float2 operator*(const float2& a, const float s) {
     return float2(a.x * s, a.y * s);
@@ -240,7 +237,7 @@ inline float cross(const float2& u, const float2& v)
 {
     return u.x*v.y - u.y*v.x;
 };
-inline float shoelace_formula(float2* p, int n)
+inline float polygon_area(float2* p, int n)
 {
     float s = 0;
     for(int i = 0; i < n; i++)
@@ -249,7 +246,28 @@ inline float shoelace_formula(float2* p, int n)
         s += p[i].x*p[i_next].y - p[i].y * p[i_next].x;
     };
     return 0.5*s;
-}
+};
+inline void polygon_area_gradients(float2* p, float2* grad, int n, float prefactor, bool accumulate)
+{
+    if(accumulate == false)
+    {
+        for(int i = 0; i < n; i++)
+        {
+            grad[i] = zero2;
+        };
+    };
+    for(int i = 0; i < n; i++)
+    {
+        //as in area gradients,
+        //a vertex takes a grad equal to the 90 degs rotation
+        //of the next vertex, negated (or a -90 degs rotation)
+        //indeed the 
+        int i_next = pmod(i+1,n);
+        int i_prev = pmod(i-1,n);
+        grad[i].x += 0.5f * prefactor*(p[i_next].y - p[i_prev].y); 
+        grad[i].y += -0.5f * prefactor*(p[i_next].x - p[i_prev].x);
+    };
+};
 inline float quad_area_signed(const float2& v1, const float2& v2, const float2& v3, const float2& v4)
 {
     float s = v1.x*v2.y - v1.y*v2.x
@@ -265,10 +283,24 @@ inline float tri_area_signed(const float2& v1, const float2& v2, const float2& v
             + v3.x*v1.y - v3.y*v1.x;
     return 0.5f * s;
 };
-inline float quad_area(const float2& v1, const float2& v2, const float2& v3, const float2& v4)
+inline void quad_area_gradients(const float2& v1, const float2& v2, const float2& v3, const float2& v4, float2& g1, float2& g2, float2& g3, float2& g4, float prefactor, bool accumulate)
 {
-    return 0.5*fabsf(quad_area_signed(v1,v2,v3,v4));
-}
+    if(accumulate == false)
+    {
+        g1 = zero2;
+        g2 = zero2;
+        g3 = zero2;
+        g4 = zero2;
+    };
+    g1.x += 0.5f * prefactor*(v2.y - v4.y); 
+    g1.y += -0.5f * prefactor*(v2.x - v4.x);
+    g2.x += 0.5f * prefactor*(v3.y - v1.y); 
+    g2.y += -0.5f * prefactor*(v3.x - v1.x);
+    g3.x += 0.5f * prefactor*(v4.y - v2.y); 
+    g3.y += -0.5f * prefactor*(v4.x - v2.x);
+    g4.x += 0.5f * prefactor*(v1.y - v3.y); 
+    g4.y += -0.5f * prefactor*(v1.x - v3.x);
+};
 inline float2 normalize(const float2& a) {
     return a / length(a);
 };
@@ -331,3 +363,46 @@ inline float3 midpoint(const float3& a, const float3& b)
 };
 
 
+//generic functions
+void fill(float* x, int n, float v)
+{
+    for(int i = 0; i < n; i++)
+    {
+        x[i] = v;
+    };
+};
+void fill(float2* x, int n, const float2 v)
+{
+    for(int i = 0; i < n; i++)
+    {
+        x[i] = v;
+    };
+};
+void fill(float3* x, int n, const float3 v)
+{
+    for(int i = 0; i < n; i++)
+    {
+        x[i] = v;
+    };
+};
+void fill(int* x, int n, int v)
+{
+    for(int i = 0; i < n; i++)
+    {
+        x[i] = v;
+    };
+};
+void fill(int2* x, int n, const int2 v)
+{
+    for(int i = 0; i < n; i++)
+    {
+        x[i] = v;
+    };
+};  
+void fill(int3* x, int n, const int3 v)
+{
+    for(int i = 0; i < n; i++)
+    {
+        x[i] = v;
+    };
+};
