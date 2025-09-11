@@ -52,12 +52,7 @@ void init_params(float*& gamma_a, float*& gamma_b, float*& gamma_l, float*& A0,
     fill(A0, num_cells, A0_init);
 };
 
-void get_equilibrium_params_flat_tissue(const float w_eq, const float h_eq, const float K, const float gamma, float& gamma_l)
-{
-    //energy reads:
-    // (K/2)*(wh-A0)^2 + 2*gamma*w + gamma_l*h
-    
-};
+
 
 void lvm_compute_geometry(float2* apical, float2* basal, 
                             float* l_a, float* l_b, float* l_l, float* area,
@@ -111,3 +106,37 @@ void lvm_accumulate_geometry_gradients(float2* apical, float2* basal,
                             area_diff, true);
     };
 };  
+
+
+void apply_force_boundary_conditions_flat_tissue(float2* apical, float2* basal,
+                                float2* apical_grads, float2* basal_grads,
+                                float force,
+                                bool comoving_x_left, bool comoving_x_right,
+                                bool fixed_y_left, bool fixed_y_right,
+                                int num_vertices)
+{
+    float avg_left_x_grad = (apical_grads[0].x + basal_grads[0].x)*0.5f;
+    float avg_right_x_grad = (apical_grads[num_vertices-1].x + basal_grads[num_vertices-1].x)*0.5f;
+    float x_c_left = (apical[0].x + basal[0].x)*0.5f;
+    float x_c_right = (apical[num_vertices-1].x + basal[num_vertices-1].x)*0.5f;
+    if(comoving_x_left)
+    {
+        apical_grads[0].x = avg_left_x_grad + force/2.0f;
+        basal_grads[0].x = avg_left_x_grad + force/2.0f;
+    }
+    else
+    {
+        apical_grads[0].x += force/2.0f;
+        basal_grads[0].x += force/2.0f;
+    };
+    if(comoving_x_right)
+    {
+        apical_grads[num_vertices-1].x = avg_right_x_grad - force/2.0f;
+        basal_grads[num_vertices-1].x = avg_right_x_grad - force/2.0f;
+    }
+    else
+    {
+        apical_grads[num_vertices-1].x -= force/2.0f;
+        basal_grads[num_vertices-1].x -= force/2.0f;
+    };
+};
