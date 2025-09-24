@@ -2,7 +2,7 @@
 #include <cmath>
 #include <limits>
 #include <algorithm>
-using namespace std;
+
 static constexpr float inf = std::numeric_limits<float>::infinity();
 static constexpr float quiet_nan = std::numeric_limits<float>::quiet_NaN();
 
@@ -150,7 +150,14 @@ inline float2 operator/(const float2& a, const float s) {
     float inv = 1.0f / s;
     return a * inv;
 };
-
+inline bool operator==(const float2& a, const float2& b)
+{
+    return (a.x == b.x) && (a.y == b.y);
+};
+inline bool operator!=(const float2& a, const float2& b)
+{
+    return !(a == b);
+};
 inline float2& operator+=(float2& a, const float2& b) {
     a.x += b.x;
     a.y += b.y;
@@ -324,7 +331,12 @@ inline bool is_right_of(const float2& x, const float2& source, const float2& tar
 {
     return cross(x - source, target-source) > 0;
 };
-
+inline float2 apply_unit_vector_grad(const float2& r, const float2& v)
+{
+    float r_length = length(r);
+    float2 r_hat = r/r_length;
+    return (v - dot(v, r_hat)*r_hat)/r_length;
+};
 // useful float3 funcs
 inline float3 cross(const float3& u, const float3& v)
 {
@@ -405,4 +417,69 @@ void fill(int3* x, int n, const int3 v)
     {
         x[i] = v;
     };
+};
+
+
+int pbc_diff(int a, int b, int n)
+{
+    int d = a - b;
+    if(d > n/2)
+        d -= n;
+    else if(d < -n/2)
+        d += n;
+    return d;
+};
+int2 pbc_diff(int2 a, int2 b, int2 n)
+{
+    return int2(pbc_diff(a.x, b.x, n.x), pbc_diff(a.y, b.y, n.y));
+};
+
+inline void get_closest_points_segments(
+    const float2 p1, const float2 p2,
+    const float2 q1, const float2 q2,
+    float& s, float& t, float2& r_vec)
+{
+    const float2 u = p2 - p1;
+    const float2 v = q2 - q1;
+    const float2 w0 = p1 - q1;
+
+    const float a = dot(u,u);      // u·u
+    const float b = dot(u,v);      // u·v
+    const float c = dot(v,v);      // v·v
+    const float d = dot(u,w0);     // u·w0
+    const float e = dot(v,w0);     // v·w0
+    const float D = a*c - b*b;     // denominator
+
+    float sN, sD = D, tN, tD = D;
+
+    if (D < 1e-20f) {              // almost parallel
+        sN = 0.0f;  sD = 1.0f;
+        tN = e;     tD = c;
+    } else {
+        sN = (b*e - c*d);
+        tN = (a*e - b*d);
+        // clamp sN to [0, sD]
+        if (sN < 0.0f) { sN = 0.0f; tN = e; tD = c; }
+        else if (sN > sD) { sN = sD; tN = e + b; tD = c; }
+    }
+
+    // clamp tN (and recompute sN if needed)
+    if (tN < 0.0f) {
+        tN = 0.0f;
+        if (-d < 0.0f)      sN = 0.0f;
+        else if (-d > a)    sN = sD;
+        else { sN = -d; sD = a; }
+    } else if (tN > tD) {
+        tN = tD;
+        if ((-d + b) < 0.0f)       sN = 0.0f;
+        else if ((-d + b) > a)     sN = sD;
+        else { sN = (-d + b); sD = a; }
+    }
+
+    s = (fabsf(sD) < 1e-20f) ? 0.0f : (sN / sD);
+    t = (fabsf(tD) < 1e-20f) ? 0.0f : (tN / tD);
+
+    const float2 P = p1 + s * u;
+    const float2 Q = q1 + t * v;
+    r_vec = P - Q;
 };
