@@ -1,8 +1,7 @@
 #pragma once
 #include "basics.cuh"
-#include "cudaKernels.cuh"
+#include "cuda_kernels.cuh"
 #include <cub/cub.cuh>
-
 
 __global__ void scatter_ranges(const int* __restrict__ unique_ids,
                                const int* __restrict__ unique_offsets,   // start per run
@@ -34,7 +33,7 @@ __global__ void neighbor_loop_kernel(const int* __restrict__ occupied_cells_ids,
     //int r = blockIdx.x * blockDim.x + threadIdx.x;
     int r = blockIdx.x;
     if(r >= num_occupied_cells) return;
-    int cell_id = occupied_cells_ids[r];
+    //int cell_id = occupied_cells_ids[r];
     int start = offsets[r];
     int end = start + counts[r];
 
@@ -47,6 +46,7 @@ __global__ void neighbor_loop_kernel(const int* __restrict__ occupied_cells_ids,
     {
         int nb_count = 0;
         float3 particle_position = particles[i].position;
+        float3 particle_polarity = particles[i].polarity;
         int3 particle_cell = compute_cell(particle_position, system);
         float3 vel = make_float3(0.0f, 0.0f, 0.0f);
         for(int dz = -1; dz <= 1; dz++) {
@@ -68,17 +68,20 @@ __global__ void neighbor_loop_kernel(const int* __restrict__ occupied_cells_ids,
                     int n_end = cell_end[neighbor_cell_id];
                     if(n_start == -1 || n_end == -1) continue;
                     for(int j = n_start; j < n_end; j++) {
+                        if(i == j) continue;
                         float3 r;
+                        float3 neighbor_position = particles[j].position;
                         if(system.use_periodic) {
-                            r = periodic_diff(particle_position, particles[j].position, domain_min, domain_max);
+                            r = periodic_diff(particle_position, neighbor_position, domain_min, domain_max);
                         }
                         else {
-                            r = particle_position - particles[j].position;
+                            r = particle_position - neighbor_position;
                         };
                         float r_dist2 = dot(r, r);
                         if(r_dist2 < cutoff2) {
                             nb_count++;
-                            float s = dot(particles[i].polarity, particles[j].polarity);
+                            float3 neighbor_polarity = particles[j].polarity;
+                            float s = dot(particle_polarity, neighbor_polarity);
                             morse_force(r,1.0,cutoff/2.0, cutoff/2.0, cutoff, s, vel, true);
                         };
                     };
@@ -86,16 +89,6 @@ __global__ void neighbor_loop_kernel(const int* __restrict__ occupied_cells_ids,
             }
         }
         particles[i].velocity += vel;
-    };
-};
-
-
-__global__ void euler_step(Particle* particles, int num_particles, System system, float dt) {
-    int idx = blockIdx.x * blockDim.x + threadIdx.x;
-    if(idx < num_particles) {
-        particles[idx].position += particles[idx].velocity * dt;
-        particles[idx].velocity = make_float3(0.0f, 0.0f, 0.0f); // reset velocity
-        particles[idx].position  = wrap_pbc(particles[idx].position, system.domain_min, system.domain_max);
     };
 };
 
@@ -108,7 +101,6 @@ public:
     int num_cells = 0;
     int block_size = 0;
     int grid_size = 0;
-    int3* d_cells = nullptr;
     int* d_cell_ids = nullptr;
     int* d_sorted_cell_ids = nullptr;
     int* d_unique_cell_ids = nullptr;
@@ -140,7 +132,6 @@ public:
         this->block_size = block_size;
         this->grid_size = (num_particles + block_size - 1) / block_size;
         this->h_num_unique_cells = 0;
-        device_allocate(d_cells, num_particles);
         device_allocate(d_cell_ids, num_particles);
         device_allocate(d_sorted_cell_ids, num_particles);
         device_allocate(d_unique_cell_ids, num_particles);
@@ -157,7 +148,7 @@ public:
             return false;
         };
 
-        compute_cells<<<grid_size, block_size>>>(particles, d_cells, d_cell_ids, num_particles, system);
+        compute_cell_ids<<<grid_size, block_size>>>(particles, d_cell_ids, num_particles, system);
         cudaDeviceSynchronize();
 
         //sorting part
@@ -265,7 +256,6 @@ public:
         block_size = 0;
         grid_size = 0;
         h_num_unique_cells = 0;
-        cudaFree(d_cells);
         cudaFree(d_cell_ids);
         cudaFree(d_sorted_cell_ids);
         cudaFree(d_unique_cell_ids);
@@ -321,82 +311,4 @@ public:
         delete[] h_unique_cell_offsets;
         
     }
-};
-
-
-class Simulation {
-private:
-    System system;
-    //device variables
-    int num_particles = 0;
-    Particle* particles = nullptr;
-    Particle* temp_particles = nullptr;
-public:
-    CellList cell_list;
-
-    Simulation(System sys, int num_particles, int block_size = 256) : system(sys), num_particles(num_particles) {
-       
-        cudaMalloc(&particles, num_particles * sizeof(Particle));
-        cudaMalloc(&temp_particles, num_particles * sizeof(Particle));
-        cell_list.init(num_particles, system.grid_size.x * system.grid_size.y * system.grid_size.z, block_size);
-    };
-
-
-    void particles_random_init(default_random_engine& generator)
-    {
-        uniform_real_distribution<float> dist_x(system.domain_min.x, system.domain_max.x);
-        uniform_real_distribution<float> dist_y(system.domain_min.y, system.domain_max.y);
-        uniform_real_distribution<float> dist_z(system.domain_min.z, system.domain_max.z);
-        normal_distribution<float> dist_v(0.0f, 1.0f);
-        for (int i = 0; i < num_particles; ++i) {
-            float3 h_pos = make_float3(dist_x(generator), dist_y(generator), dist_z(generator));
-            cudaMemcpy(&particles[i].position, &h_pos, sizeof(float3), cudaMemcpyHostToDevice);
-            float3 h_vel = make_float3(0.0f, 0.0f, 0.0f);
-            float3 h_pol = make_float3(dist_v(generator), dist_v(generator), dist_v(generator));
-            h_pol = normalize(h_pol);
-            cudaMemcpy(&particles[i].polarity, &h_pol, sizeof(float3), cudaMemcpyHostToDevice);
-            cudaMemcpy(&particles[i].velocity, &h_vel, sizeof(float3), cudaMemcpyHostToDevice);
-            cudaMemcpy(&particles[i].id, &i, sizeof(int), cudaMemcpyHostToDevice);
-        }
-    }
-
-    bool update()
-    {
-        bool success = cell_list.update(particles, temp_particles, system);
-        Particle* temp = particles;
-        particles = temp_particles;
-        temp_particles = temp;
-        return success;
-    };
-
-
-    void loop()
-    {
-        cell_list.loop(particles, system);
-    };
-
-    void step(float dt) {
-        euler_step<<<cell_list.grid_size, cell_list.block_size>>>(particles, num_particles, system, dt);
-    };
-
-    void free()
-    {
-        cudaFree(particles);
-        cudaFree(temp_particles);
-        particles = nullptr;
-        temp_particles = nullptr;
-        num_particles = 0;
-        system = System();
-        cell_list.free();
-    };
-
-    void get_particles(Particle*& h_particles) {
-        h_particles = new Particle[num_particles];
-        cudaMemcpy(h_particles, particles, num_particles * sizeof(Particle), cudaMemcpyDeviceToHost);
-    };
-
-    ~Simulation() {
-        free();
-    };
-
 };

@@ -11,10 +11,17 @@ inline int pmod(int i, int n)
 {
     return (i % n + n) % n;
 };
-inline float fpmod(float x, float l)
+
+inline float wrap(float x, float l)
 {
-    return fmodf(fmodf(x,l) + l, l);
+    return x - l*rintf(x/l);
+}
+inline float wrap(float x, float x_min, float x_max)
+{
+    return x_min + wrap(x - x_min, x_max - x_min);
 };
+
+
 inline int pack(int r, int c, int dim)
 {
     return r*dim+c;

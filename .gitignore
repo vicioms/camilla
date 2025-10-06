@@ -7,3 +7,5 @@ __pycache__/
 *.bin
 *.nd2
 *.tif
+particles/movies/
+particles/particles.txt
