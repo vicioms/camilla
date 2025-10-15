@@ -1,9 +1,10 @@
 #pragma once
-#include "helper_math.h"
-#include <random>
+#include <cuda.h>
+#include <curand_kernel.h>
+#include <cuda_runtime.h>
 #include <cub/cub.cuh>
-#include "cuda.h"
-#include "cuda_runtime.h"
+#include "../helper_math.h"
+#include <random>
 using namespace std;
 
 #ifndef TILE_DIM
@@ -186,6 +187,7 @@ __global__ void particleSimulation_loop(
                                 float3 box,
                                 int3 grid_size,
                                 float cutoff_radius,
+                                float v0,
                                 float force_strength,
                                 float force_r0,
                                 float force_alpha,
@@ -240,17 +242,21 @@ __global__ void particleSimulation_loop(
                 float4 d = wrapped_float4_diff(pos_i, pos_j, box);
                 float r2 = d.x * d.x + d.y * d.y + d.z * d.z;
                 if(r2 > cutoff_radius2) continue;
-                float4 pol_j = particle_j.polarity;
-                float polarity_dot = pol_i.x * pol_j.x + pol_i.y * pol_j.y + pol_i.z * pol_j.z;
                 float r = sqrtf(r2);
                 float exp_term = expf(-(r - force_r0) * force_alpha);
-                float force_magnitude =  (exp_term*exp_term - polarity_dot*exp_term);
-                //force_magnitude -= (exp_term_at_cutoff*exp_term_at_cutoff - polarity_dot*exp_term_at_cutoff);
-                force_magnitude *= 2.0f*force_strength;
+                float force_magnitude = 2.0f*exp_term;
                 pos_force += d * (force_magnitude/r);
+                //float4 pol_j = particle_j.polarity;
+                //float polarity_dot = pol_i.x * pol_j.x + pol_i.y * pol_j.y + pol_i.z * pol_j.z;
+                //float force_magnitude =  (exp_term*exp_term - polarity_dot*exp_term);
+                ////force_magnitude -= (exp_term_at_cutoff*exp_term_at_cutoff - polarity_dot*exp_term_at_cutoff);
+                //force_magnitude *= 2.0f*force_strength;
+                //float polarity_force_magnitude = 2.0f*force_strength*exp_term;
+                //pos_force += d * (force_magnitude/r);
+                //pol_force += (pol_j-pol_i) * polarity_force_magnitude;
             }
         }
-        particles[i].position_force = pos_force;
+        particles[i].position_force = pos_force + v0 * pol_i;
         particles[i].polarity_force = pol_force;
     }
 };
@@ -354,21 +360,59 @@ __global__ void particleSimulation_loop_tiled(
 
 __global__ void particleSimulation_step(
     Particle* particles,
+    curandStatePhilox4_32_10_t* random_states,
     int num_particles,
     float3 box_origin, float3 box,
+    float eta,
     float dt)
 {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     if (idx >= num_particles) return;
 
     // Update positions and polarities based on forces
-    particles[idx].position += particles[idx].position_force * dt;
-    particles[idx].polarity += particles[idx].polarity_force * dt;
-    particles[idx].polarity = normalize(particles[idx].polarity);
-    particles[idx].position = wrap_float4(particles[idx].position, box_origin, box);
+    float4 position = particles[idx].position;
+    position += particles[idx].position_force * dt;
+    position.w = 0.0f;
+    //if(eta > 0.0f) {
+    //    curandStatePhilox4_32_10_t local_state = random_states[idx];
+    //    float noise_x = curand_normal(&local_state) * sqrtf(2.0f * eta * dt);
+    //    float noise_y = curand_normal(&local_state) * sqrtf(2.0f * eta * dt);
+    //    float noise_z = curand_normal(&local_state) * sqrtf(2.0f * eta * dt);
+    //    position.x += noise_x;
+    //    position.y += noise_y;
+    //    position.z += noise_z;
+    //    random_states[idx] = local_state;
+    //};
+    position = wrap_float4(position, box_origin, box);
+    particles[idx].position = position;
+    float4 polarity = particles[idx].polarity;
+    polarity += particles[idx].polarity_force * dt;
+    if(eta > 0.0f) {
+        curandStatePhilox4_32_10_t local_state = random_states[idx];
+        float noise_px = curand_normal(&local_state) * sqrtf(2.0f * eta * dt);
+        float noise_py = curand_normal(&local_state) * sqrtf(2.0f * eta * dt);
+        float noise_pz = curand_normal(&local_state) * sqrtf(2.0f * eta * dt);
+        polarity.x += noise_px;
+        polarity.y += noise_py;
+        polarity.z += noise_pz;
+        random_states[idx] = local_state;
+    };
+    polarity.w = 0.0f;
+    particles[idx].polarity = polarity/sqrtf(polarity.x*polarity.x + polarity.y*polarity.y + polarity.z*polarity.z);
+    
     // Reset forces for the next iteration
     particles[idx].position_force = make_float4(0.0f);
     particles[idx].polarity_force = make_float4(0.0f);
+};
+
+
+__global__ void init_random_states(curandStatePhilox4_32_10_t* states,
+                            unsigned long long seed, size_t n) {
+    size_t gid = blockIdx.x * blockDim.x + threadIdx.x;
+    if (gid < n) {
+        // sequence = gid makes streams independent per thread
+        curand_init(seed, /*sequence*/ gid, /*offset*/ 0, &states[gid]);
+    }
 };
 
 class ParticleSimulation {
@@ -381,6 +425,7 @@ public:
     int num_cells;
     float skin;
     float cutoff_radius;
+    float eta;
     //cuda parameters
     int num_threads_per_block = 64;
     //simulation variables
@@ -398,17 +443,20 @@ public:
     int* cell_end = nullptr;
     int num_occupied_cells = 0;
     //top_k<K>* knns = nullptr;
+    curandStatePhilox4_32_10_t* random_states = nullptr;
     CubWorkspace sort_workspace;
     CubWorkspace rle_workspace;
     CubWorkspace scan_workspace;
     CubWorkspace max_workspace;
     //potential params
+    float v0;
     float force_strength;
     float force_r0;
     float force_alpha;
 
-    ParticleSimulation(int num_particles, float f_strength, float f_r0, float f_alpha, float3 box_origin, float3 box, float cell_size, float cutoff_radius)
+    ParticleSimulation(int num_particles, float v0, float f_strength, float f_r0, float f_alpha, float3 box_origin, float3 box, float cell_size, float cutoff_radius, float eta, int seed)
     {
+        this->v0 = v0;
         this->force_strength = f_strength;
         this->force_r0 = f_r0;
         this->force_alpha = f_alpha;
@@ -417,15 +465,17 @@ public:
         this->cell_size = cell_size;
         this->cutoff_radius = cutoff_radius;
         this->skin = fmaxf(cell_size - cutoff_radius, 0.0f);
+        this->eta = eta;
+         //initialize random states
         grid_size.x = (int)ceilf((box.x - box_origin.x) / cell_size);
         grid_size.y = (int)ceilf((box.y - box_origin.y) / cell_size);
         grid_size.z = (int)ceilf((box.z - box_origin.z) / cell_size);
         num_cells = grid_size.x * grid_size.y * grid_size.z;
         this->num_particles = num_particles;
-        allocate();
+        allocate(seed);
     };
 
-    void allocate()
+    void allocate(unsigned long long seed)
     {
         cudaMalloc(&particles, num_particles * sizeof(Particle));
         cudaMalloc(&temp_particles, num_particles * sizeof(Particle));
@@ -436,7 +486,11 @@ public:
         cudaMalloc(&cell_offsets, num_particles * sizeof(int));
         cudaMalloc(&cell_start, num_cells * sizeof(int));
         cudaMalloc(&cell_end, num_cells * sizeof(int));
-
+        cudaMalloc(&random_states, num_particles * sizeof(curandStatePhilox4_32_10_t));
+        int num_blocks = (num_particles + num_threads_per_block - 1) / num_threads_per_block;
+        init_random_states<<<num_blocks, num_threads_per_block>>>(random_states, seed, num_particles);
+        cudaDeviceSynchronize();
+        //knns = new top_k<K>[num_particles];
         //cudaMalloc(&position_before_update, num_particles * sizeof(float4));
         //cudaMalloc(&displacements_from_update, num_particles * sizeof(float));
     };
@@ -571,6 +625,7 @@ public:
             box,
             grid_size,
             cutoff_radius,
+            v0,
             force_strength,
             force_r0,
             force_alpha,
@@ -599,9 +654,12 @@ public:
         int num_blocks = (num_particles + num_threads_per_block - 1) / num_threads_per_block;
         particleSimulation_step<<<num_blocks, num_threads_per_block>>>(
             particles,
+            random_states,
             num_particles,
             box_origin, box,
+            eta,
             dt);
+        
     };
 
     void free()

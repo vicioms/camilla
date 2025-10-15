@@ -1,5 +1,5 @@
 #pragma once
-#include "../generic.h"
+#include "../hmath.h"
 using namespace std;
 
 int lvm_init_flat_tissue(float2*& apical, float2*& basal, 
