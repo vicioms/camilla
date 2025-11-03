@@ -9,3 +9,4 @@ __pycache__/
 *.tif
 particles/movies/
 particles/particles.txt
+videos/
