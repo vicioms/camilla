@@ -20,7 +20,7 @@ def extract_subsequences(arrival_times: np.ndarray, features: np.ndarray, max_nu
     subsequence_arrival_times = [ arrival_times[masks[index, :]] for index in range(masks.shape[0]) ]
     subsequence_features = [ features[masks[index, :], :] for index in range(masks.shape[0]) ]
     return subsequence_arrival_times, subsequence_features, t_start, t_end
-def pack_sequences(feature_list : List[np.ndarray], batch_first : bool, valid_mask_is_true : bool):
+def pack_sequences(feature_list : List[np.ndarray], batch_first : bool, valid_mask_is_true : bool, sequence_has_inter_times : bool):
     num_of_events = np.array([len(features) for features in feature_list])
     max_num_events = num_of_events.max()
     num_sequences = len(feature_list)
@@ -29,11 +29,13 @@ def pack_sequences(feature_list : List[np.ndarray], batch_first : bool, valid_ma
     masks = np.full((num_sequences, max_num_events), fill_value=not valid_mask_is_true, dtype=bool)
     for index in range(num_sequences):
         n_events = num_of_events[index]
+        if sequence_has_inter_times:
+            n_events -= 1
         packed_features[index, 0:n_events, :] = feature_list[index]
         masks[index, 0:n_events] = valid_mask_is_true
     if(not batch_first):
         packed_features = np.transpose(packed_features, (1,0,2))
-    return packed_features, masks
+    return packed_features, num_of_events, masks
 
 def arrival_to_inter_times(arrival_times : np.ndarray, t_start : float, t_end : float):
     inter_times = np.diff(arrival_times, prepend=t_start, append=t_end)
