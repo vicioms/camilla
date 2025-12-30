@@ -12,6 +12,8 @@ class Sequence:
                         duration_scale : float,
                         return_inter_times : bool,
                         random_seed : Union[int, None] = None):
+        if(random_seed is not None):
+            np.random.seed(random_seed)
         t_min = self.arrival_times.min()
         t_max = self.arrival_times.max()
         t_start = np.random.uniform(t_min, t_max, size=max_num_sequences)
@@ -19,7 +21,7 @@ class Sequence:
         t_end = np.minimum(t_start + durations, t_max)
         masks = self.arrival_times[None, :] >= t_start[:, None]
         masks = masks & (self.arrival_times[None, :] <= t_end[:, None])
-        valid_masks = masks.sum(axis=1) > 0
+        valid_masks = masks.sum(axis=1) > 1
         masks = masks[valid_masks, :]
         
         t_start = t_start[valid_masks]
@@ -40,7 +42,6 @@ class Sequence:
         batch_size = len(sequences)
         feature_dim = sequences[0].shape[1] if len(sequences[0].shape) > 1 else 1
         packed_array = np.zeros((batch_size, max_length, feature_dim))
-        mask = np.zeros((batch_size, max_length), dtype=bool)
         for i, seq in enumerate(sequences):
             length = seq.shape[0]
             packed_array[i, :length, ...] = seq

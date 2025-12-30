@@ -10,3 +10,5 @@ __pycache__/
 particles/movies/
 particles/particles.txt
 videos/
+earthquakes/STEAD/
+earthquakes/gps/IGS20_24h_final/

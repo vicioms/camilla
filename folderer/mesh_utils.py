@@ -1,5 +1,5 @@
 import numpy as np
-import pymeshfix
+#import pymeshfix
 import open3d as o3d
 from typing import Union
 from math import sqrt
