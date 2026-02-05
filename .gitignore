@@ -13,3 +13,5 @@ videos/
 earthquakes/STEAD/
 earthquakes/gps/IGS20_24h_final/
 folderer/ml/checkpoints
+sample_data/
+enet.ipynb
