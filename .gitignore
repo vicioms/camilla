@@ -12,6 +12,8 @@ particles/particles.txt
 videos/
 earthquakes/STEAD/
 earthquakes/gps/IGS20_24h_final/
-folderer/ml/checkpoints
+folderer/ml/checkpoints/
+folderer/meshes/
+folderer/segmentations/
 sample_data/
 enet.ipynb
