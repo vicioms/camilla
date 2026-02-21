@@ -8,7 +8,7 @@ from rotary_embedding_torch import RotaryEmbedding, apply_rotary_emb
 # logic of RoPE
 # x is (..., N, D)
 #positions = torch.arange(x.shape[-2], device=x.device) (can be custom positions)
-#omegas = 1.0 / (10000 ** (torch.arange(0, x.shape[-1], 2, device=x.device) / x.shape[-1]))
+#omegas = 1.0 / (10000 ** (torch.arange(0, x.shape[-1], 2, device=x.device).float() / x.shape[-1]))
 #pos_omegas = torch.einsum('n,d->nd', positions, omegas)
 #cos = pos_omegas.cos()
 #cos = torch.stack([cos, cos], dim=-1).flatten(-2)
@@ -16,6 +16,7 @@ from rotary_embedding_torch import RotaryEmbedding, apply_rotary_emb
 #sin = torch.stack([sin, sin], dim=-1).flatten(-2)
 #def rotate_half(x):
 #    return torch.stack([-x[...,1::2], x[...,::2]], dim=-1).reshape_as(x)
+# (x * cos) + (rotate_half(x) * sin)
 
 class TransformerLayerRoPE(nn.Module):
     def __init__(self, emb_dim : int,
