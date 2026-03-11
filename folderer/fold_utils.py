@@ -185,7 +185,8 @@ def get_triangle_adjacency_matrix(triangles):
 
     return sparse.coo_matrix((np.ones(len(rows)), (rows, cols)), shape=(F, F)).tocsr()
 
-        
+def _edge_crosses(si,sj, epsilon):
+        return np.logical_and(si > epsilon, sj < -epsilon) | np.logical_and(si < -epsilon, sj > epsilon)
 def plane_mesh_slice(vertices, triangles, plane_origin, plane_normal, epsilon=0):
     # plane/line intersection:
     # n * (p - p0) = 0
@@ -195,11 +196,10 @@ def plane_mesh_slice(vertices, triangles, plane_origin, plane_normal, epsilon=0)
     signed_distances = (vertices - plane_origin) @ plane_normal
     i0, i1, i2 = triangles[:, 0], triangles[:, 1], triangles[:, 2]
     s0, s1, s2 = signed_distances[i0], signed_distances[i1], signed_distances[i2]
-    def edge_crosses(si,sj):
-        return np.logical_and(si > epsilon, sj < -epsilon) | np.logical_and(si < -epsilon, sj > epsilon)
-    c01_crosses = edge_crosses(s0, s1)
-    c12_crosses = edge_crosses(s1, s2)
-    c20_crosses = edge_crosses(s2, s0)
+    
+    c01_crosses = _edge_crosses(s0, s1, epsilon)
+    c12_crosses = _edge_crosses(s1, s2, epsilon)
+    c20_crosses = _edge_crosses(s2, s0, epsilon)
     den01 = (s0-s1)
     den12 = (s1-s2)
     den20 = (s2-s0)
@@ -226,6 +226,72 @@ def plane_mesh_slice(vertices, triangles, plane_origin, plane_normal, epsilon=0)
     segments = P_good[M_good].reshape(-1,2,3)
 
     return segments, np.argwhere(good_triangles).flatten(), E_good[M_good].reshape(-1,2)
+def plane_mesh_slices_single_normal(vertices, triangles, plane_origins, plane_normal, epsilon=0):
+    v_dot_n = vertices @ plane_normal                     # (num_vertices,)
+    o_dot_n = plane_origins @ plane_normal               # (num_planes,)
+
+    # (num_planes, num_vertices)
+    signed_distances = v_dot_n[None, :] - o_dot_n[:, None]
+
+    i0, i1, i2 = triangles[:, 0], triangles[:, 1], triangles[:, 2]
+
+    # (num_planes, num_triangles)
+    s0 = signed_distances[:, i0]
+    s1 = signed_distances[:, i1]
+    s2 = signed_distances[:, i2]
+
+    c01_crosses = _edge_crosses(s0, s1, epsilon)
+    c12_crosses = _edge_crosses(s1, s2, epsilon)
+    c20_crosses = _edge_crosses(s2, s0, epsilon)
+
+    den01 = s0 - s1
+    den12 = s1 - s2
+    den20 = s2 - s0
+
+    t01 = np.full(s0.shape, np.nan, dtype=vertices.dtype)
+    t12 = np.full(s0.shape, np.nan, dtype=vertices.dtype)
+    t20 = np.full(s0.shape, np.nan, dtype=vertices.dtype)
+
+    t01[c01_crosses] = s0[c01_crosses] / den01[c01_crosses]
+    t12[c12_crosses] = s1[c12_crosses] / den12[c12_crosses]
+    t20[c20_crosses] = s2[c20_crosses] / den20[c20_crosses]
+
+    v0, v1, v2 = vertices[i0], vertices[i1], vertices[i2]   # (num_triangles, 3)
+
+    # (num_planes, num_triangles, 3)
+    p01 = v0[None, :, :] + (v1 - v0)[None, :, :] * t01[:, :, None]
+    p12 = v1[None, :, :] + (v2 - v1)[None, :, :] * t12[:, :, None]
+    p20 = v2[None, :, :] + (v0 - v2)[None, :, :] * t20[:, :, None]
+
+    # candidate points and masks
+    # P: (num_planes, num_triangles, 3_edges, 3_xyz)
+    # M: (num_planes, num_triangles, 3_edges)
+    P = np.stack([p01, p12, p20], axis=2)
+    M = np.stack([c01_crosses, c12_crosses, c20_crosses], axis=2)
+
+    # edge vertex ids: (num_triangles, 3_edges, 2)
+    E = np.stack(
+        [triangles[:, [0, 1]], triangles[:, [1, 2]], triangles[:, [2, 0]]],
+        axis=1
+    )
+
+    # triangles cut in exactly two edges
+    good = np.sum(M, axis=2) == 2                        # (num_planes, num_triangles)
+
+    # indices of (plane, triangle) that produce one segment
+    plane_ids, tri_ids = np.nonzero(good)
+
+    # select only good plane-triangle pairs
+    P_good = P[good]                                     # (num_good, 3_edges, 3_xyz)
+    M_good = M[good]                                     # (num_good, 3_edges)
+    E_good = E[tri_ids]                                  # (num_good, 3_edges, 2)
+
+    # pick the 2 valid points / edges for each good pair
+    segments = P_good[M_good].reshape(-1, 2, 3)          # (num_good, 2, 3)
+    crossed_edges = E_good[M_good].reshape(-1, 2, 2)     # (num_good, 2, 2)
+
+    return segments, plane_ids, tri_ids, crossed_edges
+
 def get_longest_shortest_path(graph):
     best_pair = max([ (u, *max(dist.items(), key=lambda x: x[1]))   for u, dist in nx.all_pairs_shortest_path_length(graph)], key=lambda x: x[2])
     return nx.shortest_path(graph, best_pair[0], best_pair[1])
