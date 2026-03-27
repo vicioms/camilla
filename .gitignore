@@ -17,5 +17,5 @@ folderer/meshes/
 folderer/segmentations/
 sample_data/
 enet.ipynb
-particlefield/data/*
-particlefield/data_old
+particlefield/data*
+particlefield/logs*
