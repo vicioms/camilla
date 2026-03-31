@@ -1,8 +1,9 @@
 bullshit/
 build/
 .vscode/
-__pycache__/
+*pycache*
 .ipynb_checkpoints/
+local_files/
 *.o
 *.bin
 *.nd2
