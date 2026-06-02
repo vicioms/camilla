@@ -392,7 +392,7 @@ def plane_mesh_slice(vertices, triangles, plane_origin, plane_normal, epsilon=0)
     segments = P_good[M_good].reshape(-1,2,3)
 
     return segments, np.argwhere(good_triangles).flatten(), E_good[M_good].reshape(-1,2)
-def plane_mesh_slices_single_normal(vertices, triangles, plane_origins, plane_normal, epsilon=0):
+def plane_mesh_slices_single_normal(vertices, triangles, plane_origins, plane_normal, epsilon=0, return_signed_distances=False):
     v_dot_n = vertices @ plane_normal                     # (num_vertices,)
     o_dot_n = plane_origins @ plane_normal               # (num_planes,)
 
@@ -455,8 +455,10 @@ def plane_mesh_slices_single_normal(vertices, triangles, plane_origins, plane_no
     # pick the 2 valid points / edges for each good pair
     segments = P_good[M_good].reshape(-1, 2, 3)          # (num_good, 2, 3)
     crossed_edges = E_good[M_good].reshape(-1, 2, 2)     # (num_good, 2, 2)
-
-    return segments, plane_ids, tri_ids, crossed_edges
+    if return_signed_distances:
+        return segments, plane_ids, tri_ids, crossed_edges, signed_distances
+    else:
+        return segments, plane_ids, tri_ids, crossed_edges
 def get_longest_shortest_path(graph):
     best_pair = max([ (u, *max(dist.items(), key=lambda x: x[1]))   for u, dist in nx.all_pairs_shortest_path_length(graph)], key=lambda x: x[2])
     return nx.shortest_path(graph, best_pair[0], best_pair[1])
@@ -1091,3 +1093,464 @@ def curvature_dst(coeffs, p0, pL, s):
 
     kappa = (dx * ddy - dy * ddx) / (dx**2 + dy**2)**1.5
     return kappa
+
+
+from scipy.optimize import minimize_scalar
+from scipy.fft import dst, idst
+import numpy as np
+from scipy.optimize import minimize_scalar
+from scipy.fft import dst, idst
+
+
+class DstCurve:
+    def __init__(self, xy, n_points_reparam):
+        self.xy_s, self.s = arclength_resample(xy, n_points_reparam)
+
+        # DST-I assumes exactly uniform samples in normalized arclength.
+        self.s = np.linspace(0.0, 1.0, len(self.xy_s))
+
+        self.start_point = self.xy_s[0]
+        self.end_point = self.xy_s[-1]
+
+        self.linear_s = self.start_point + np.outer(
+            self.s,
+            self.end_point - self.start_point,
+        )
+
+        self.residual_s = self.xy_s - self.linear_s
+
+        # DST-I acts on interior points only because residual endpoints are zero.
+        self.interior = self.residual_s[1:-1]
+        self.M = len(self.interior)
+
+        self.coeffs_unnormalized = dst(
+            self.interior,
+            type=1,
+            axis=0,
+            norm="backward",
+        )
+
+        # Actual sine amplitudes:
+        # residual(s) = sum_k coeffs[k-1] sin(k pi s)
+        self.coeffs = self.coeffs_unnormalized / (self.M + 1)
+
+        # Filtering state.
+        self.cutoff_idx = len(self.coeffs)
+        self.coeffs_weight = np.ones(len(self.coeffs), dtype=float)
+
+    # ------------------------------------------------------------------
+    # Basic accessors
+    # ------------------------------------------------------------------
+
+    def get_parametrization(self):
+        return self.s
+
+    def active_coeffs(self):
+        """
+        Return filtered/weighted coefficients.
+        """
+        return self.coeffs * self.coeffs_weight[:, None]
+
+    # ------------------------------------------------------------------
+    # Filtering / cutoff
+    # ------------------------------------------------------------------
+
+    def reset_filter(self):
+        """
+        Reset to all modes active.
+        """
+        self.cutoff_idx = len(self.coeffs)
+        self.coeffs_weight[:] = 1.0
+        return self.cutoff_idx
+
+    def set_coeffs_weight(self, weight, cutoff_idx=None):
+        """
+        Directly set spectral weights.
+
+        cutoff_idx is optional bookkeeping. For smooth filters, cutoff_idx
+        should be interpreted as the filter scale, not the number of nonzero modes.
+        """
+        weight = np.asarray(weight, dtype=float)
+
+        if weight.shape[0] != len(self.coeffs):
+            raise ValueError(
+                f"weight must have length {len(self.coeffs)}, got {len(weight)}"
+            )
+
+        self.coeffs_weight[:] = weight
+
+        if cutoff_idx is not None:
+            self.cutoff_idx = int(cutoff_idx)
+            self.cutoff_idx = max(0, min(self.cutoff_idx, len(self.coeffs)))
+
+        return self.cutoff_idx
+
+    def set_cutoff(self, cutoff_idx=None):
+        """
+        Hard cutoff.
+
+        cutoff_idx=None keeps all modes.
+        cutoff_idx=m keeps modes 0,...,m-1.
+        """
+        if cutoff_idx is None:
+            return self.reset_filter()
+
+        cutoff_idx = int(cutoff_idx)
+        cutoff_idx = max(0, min(cutoff_idx, len(self.coeffs)))
+
+        weight = np.zeros(len(self.coeffs), dtype=float)
+        weight[:cutoff_idx] = 1.0
+
+        return self.set_coeffs_weight(weight, cutoff_idx=cutoff_idx)
+    
+
+    def set_cutoff_by_length(self, spacing):
+        """
+        Hard cutoff.
+
+        Find the cutoff such that no mode has wavelength shorter than spacing. For mode k, wavelength ~ 1/k.
+        """
+        if spacing is None:
+            return self.reset_filter()
+        
+        total_length = np.diff(self.xy_s, axis=0).sum()
+        cutoff_idx = int(np.floor(total_length / spacing))
+        cutoff_idx = max(0, min(cutoff_idx, len(self.coeffs)))
+
+        weight = np.zeros(len(self.coeffs), dtype=float)
+        weight[:cutoff_idx] = 1.0
+
+        return self.set_coeffs_weight(weight, cutoff_idx=cutoff_idx)
+
+    def set_cutoff_by_energy(self, energy_fraction=0.99):
+        """
+        Hard cutoff using position residual energy:
+            E_k ~ |c_k|^2
+        """
+        energy = np.sum(self.coeffs**2, axis=1)
+        total = energy.sum()
+
+        if total == 0:
+            return self.reset_filter()
+
+        cumulative = np.cumsum(energy) / total
+        cutoff_idx = np.searchsorted(cumulative, energy_fraction) + 1
+
+        return self.set_cutoff(cutoff_idx)
+
+    def set_cutoff_by_curvature_energy(self, energy_fraction=0.99):
+        """
+        Hard cutoff using curvature/bending-weighted spectral energy:
+            E_k ~ (k pi)^4 |c_k|^2
+        """
+        mode = np.arange(1, len(self.coeffs) + 1)
+        k = np.pi * mode
+
+        coeff_energy = np.sum(self.coeffs**2, axis=1)
+        curvature_energy = k**4 * coeff_energy
+
+        total = curvature_energy.sum()
+
+        if total == 0:
+            return self.reset_filter()
+
+        cumulative = np.cumsum(curvature_energy) / total
+        cutoff_idx = np.searchsorted(cumulative, energy_fraction) + 1
+
+        return self.set_cutoff(cutoff_idx)
+
+    def set_smooth_filter(self, cutoff_idx=None, kind="tikhonov", order=4):
+        """
+        Smooth spectral filter.
+
+        kind="tikhonov":
+            w_k = 1 / (1 + (k/kc)^order)
+
+        kind="exp":
+            w_k = exp(-(k/kc)^order)
+
+        kind="hard":
+            same as hard cutoff.
+        """
+        if cutoff_idx is None:
+            cutoff_idx = self.cutoff_idx
+
+        cutoff_idx = int(cutoff_idx)
+        cutoff_idx = max(1, min(cutoff_idx, len(self.coeffs)))
+
+        mode = np.arange(1, len(self.coeffs) + 1)
+        kc = float(cutoff_idx)
+
+        if kind == "hard":
+            weight = np.zeros(len(self.coeffs), dtype=float)
+            weight[:cutoff_idx] = 1.0
+
+        elif kind == "tikhonov":
+            weight = 1.0 / (1.0 + (mode / kc) ** order)
+
+        elif kind == "exp":
+            weight = np.exp(-(mode / kc) ** order)
+
+        else:
+            raise ValueError("kind must be 'hard', 'tikhonov', or 'exp'")
+
+        return self.set_coeffs_weight(weight, cutoff_idx=cutoff_idx)
+
+    # ------------------------------------------------------------------
+    # Spectrum
+    # ------------------------------------------------------------------
+
+    def get_spectrum(self, use_active=False):
+        """
+        Return spectral energies.
+
+        use_active=False uses full coefficients.
+        use_active=True uses weighted coefficients.
+        """
+        coeffs = self.active_coeffs() if use_active else self.coeffs
+
+        mode = np.arange(1, len(coeffs) + 1)
+        k = np.pi * mode
+
+        energy_x = coeffs[:, 0] ** 2
+        energy_y = coeffs[:, 1] ** 2
+        energy = energy_x + energy_y
+
+        total_energy = energy.sum()
+
+        if total_energy > 0:
+            energy_fraction = energy / total_energy
+            cumulative_energy = np.cumsum(energy_fraction)
+        else:
+            energy_fraction = np.zeros_like(energy)
+            cumulative_energy = np.zeros_like(energy)
+
+        tangent_energy = k**2 * energy
+        bending_energy = k**4 * energy
+
+        if tangent_energy.sum() > 0:
+            tangent_fraction = tangent_energy / tangent_energy.sum()
+            cumulative_tangent_energy = np.cumsum(tangent_fraction)
+        else:
+            tangent_fraction = np.zeros_like(tangent_energy)
+            cumulative_tangent_energy = np.zeros_like(tangent_energy)
+
+        if bending_energy.sum() > 0:
+            bending_fraction = bending_energy / bending_energy.sum()
+            cumulative_bending_energy = np.cumsum(bending_fraction)
+        else:
+            bending_fraction = np.zeros_like(bending_energy)
+            cumulative_bending_energy = np.zeros_like(bending_energy)
+
+        return {
+            "mode": mode,
+            "k": k,
+            "coeffs": coeffs,
+            "weights": self.coeffs_weight.copy(),
+            "energy_x": energy_x,
+            "energy_y": energy_y,
+            "energy": energy,
+            "energy_fraction": energy_fraction,
+            "cumulative_energy": cumulative_energy,
+            "tangent_energy": tangent_energy,
+            "tangent_fraction": tangent_fraction,
+            "cumulative_tangent_energy": cumulative_tangent_energy,
+            "bending_energy": bending_energy,
+            "bending_fraction": bending_fraction,
+            "cumulative_bending_energy": cumulative_bending_energy,
+            "cutoff_idx": self.cutoff_idx,
+        }
+
+    # ------------------------------------------------------------------
+    # Reconstruction
+    # ------------------------------------------------------------------
+
+    def reconstruct_residual(self, coeffs=None):
+        if coeffs is None:
+            coeffs = self.active_coeffs()
+
+        k = np.arange(1, len(coeffs) + 1)
+        Phi = np.sin(np.pi * self.s[:, None] * k[None, :])
+
+        return Phi @ coeffs
+
+    def reconstruct_xy(self, coeffs=None):
+        return self.linear_s + self.reconstruct_residual(coeffs)
+
+    def reconstruct_xy_idst(self, coeffs=None):
+        """
+        Same-grid reconstruction using scipy idst.
+        """
+        if coeffs is None:
+            coeffs = self.active_coeffs()
+
+        coeffs_full = np.zeros_like(self.coeffs)
+        coeffs_full[:len(coeffs)] = coeffs
+
+        interior_rec = idst(
+            coeffs_full * (self.M + 1),
+            type=1,
+            axis=0,
+            norm="backward",
+        )
+
+        residual_rec = np.zeros_like(self.residual_s)
+        residual_rec[1:-1] = interior_rec
+
+        return self.linear_s + residual_rec
+
+    # ------------------------------------------------------------------
+    # Derivatives and curvature
+    # ------------------------------------------------------------------
+
+    def derivatives(self, coeffs=None):
+        if coeffs is None:
+            coeffs = self.active_coeffs()
+
+        a = coeffs[:, 0]
+        b = coeffs[:, 1]
+
+        k = np.arange(1, len(a) + 1) * np.pi
+        ks = np.outer(k, self.s)
+
+        cos_ks = np.cos(ks)
+        sin_ks = np.sin(ks)
+
+        chord = self.end_point - self.start_point
+
+        dx = chord[0] + (a[:, None] * k[:, None] * cos_ks).sum(axis=0)
+        dy = chord[1] + (b[:, None] * k[:, None] * cos_ks).sum(axis=0)
+
+        ddx = -(a[:, None] * k[:, None]**2 * sin_ks).sum(axis=0)
+        ddy = -(b[:, None] * k[:, None]**2 * sin_ks).sum(axis=0)
+
+        return dx, dy, ddx, ddy
+
+    def curvature(self, coeffs=None):
+        dx, dy, ddx, ddy = self.derivatives(coeffs)
+
+        denom = (dx**2 + dy**2) ** 1.5
+        return (dx * ddy - dy * ddx) / denom
+
+    # ------------------------------------------------------------------
+    # Rotation helpers
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _rotation_matrix(theta):
+        c = np.cos(theta)
+        s = np.sin(theta)
+        return np.array([[c, -s], [s, c]])
+
+    @staticmethod
+    def _rotate_points(xy, theta):
+        R = DstCurve._rotation_matrix(theta)
+        return xy @ R.T
+
+    @staticmethod
+    def _rotate_coeffs(coeffs, theta):
+        R = DstCurve._rotation_matrix(theta)
+        return coeffs @ R.T
+
+    def optimal_function_rotation(
+        self,
+        use_active=True,
+        init="local",   
+        method="sampled",
+        n_theta_grid=720,
+        refine_width=np.pi / 180 * 5,
+        eps=1e-12,
+    ):
+        """
+        Find rotation angle theta such that the rotated curve is most safely
+        representable as y = f(x).
+
+        init="local" initializes search around an initial guess from a coarse global minimum.
+        init="none" full search over [-pi, pi).
+        init="endpoints" initializes search around the angle of the chord from start to end point.
+
+        method="bound":
+            Conservative sufficient condition:
+                min x'(s) >= dx_chord - sum_k |a_k| k pi
+
+        method="sampled":
+            Directly samples x'(s) and maximizes its minimum.
+        """
+        coeffs = self.active_coeffs() if use_active else self.coeffs
+        dl = self.end_point - self.start_point
+
+        mode = np.arange(1, len(coeffs) + 1)
+        k = np.pi * mode
+
+        def margin(theta):
+            coeffs_rot = DstCurve._rotate_coeffs(coeffs, theta)
+            dl_rot = DstCurve._rotation_matrix(theta) @ dl
+
+            a_rot = coeffs_rot[:, 0]
+            dl_x = dl_rot[0]
+
+            if dl_x <= eps:
+                return -np.inf
+
+            if method == "bound":
+                lower_bound = dl_x - np.sum(np.abs(a_rot) * k)
+                return lower_bound / abs(dl_x)
+
+            elif method == "sampled":
+                ks = np.outer(k, self.s)
+                dx = dl_x + (a_rot[:, None] * k[:, None] * np.cos(ks)).sum(axis=0)
+                return dx.min() / abs(dl_x)
+
+            else:
+                raise ValueError("method must be 'bound' or 'sampled'")
+
+        thetas = np.linspace(-np.pi, np.pi, n_theta_grid, endpoint=False)
+        margins = np.array([margin(t) for t in thetas])
+
+        if init == "local":
+
+
+            theta0 = thetas[np.nanargmax(margins)]
+
+            res = minimize_scalar(
+                lambda t: -margin(t),
+                bounds=(theta0 - refine_width, theta0 + refine_width),
+                method="bounded",
+            )
+        elif init == "endpoints":
+            chord_angle = -np.arctan2(dl[1], dl[0])
+            res = minimize_scalar(
+                lambda t: -margin(t),
+                bounds=(chord_angle - refine_width, chord_angle + refine_width),
+                method="bounded",
+            )
+        elif init == "none":
+            res = minimize_scalar(
+                lambda t: -margin(t),
+                bounds=(-np.pi, np.pi),
+                method="bounded",
+            )
+        else:
+            raise ValueError("init must be 'local', 'endpoints', or 'none'")
+        theta_best = res.x
+        margin_best = margin(theta_best)
+
+        return theta_best, margin_best
+
+    def rotated(self, theta, use_active=True):
+        """
+        Return a new DstCurve built from the rotated sampled curve.
+        """
+        if use_active:
+           points = self.reconstruct_xy()
+        else:
+            points = self.xy_s
+        xy_rot = DstCurve._rotate_points(points, theta)
+        return DstCurve(xy_rot, len(points))
+    
+    def shifted(self, shift, use_active=True):
+        if use_active:
+            points = self.reconstruct_xy() - shift
+        else:
+            points = self.xy_s - shift
+        return DstCurve(points, len(points))
