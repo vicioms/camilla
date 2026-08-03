@@ -1,0 +1,1 @@
+$$Z^r = \int_0^1 dx_a \int_0^1 dy_a e^{\frac{\beta^2\sigma^2}{2} \sum_{a,b=1}^r (\min(x_a,x_b)-x_a x_b)(\min(y_a,y_b)-y_a y_b)}  $$

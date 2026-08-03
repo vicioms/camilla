@@ -177,6 +177,13 @@ inline int pmod(int i, int n)
     return (i % n + n) % n;
 }
 
+
+// ------------------------------------------------------------
+// OLD FUNCTIONS: centered / minimum-image wrapping
+// Maps to roughly [-L/2, L/2].
+// Keep using these for pair differences.
+// ------------------------------------------------------------
+
 inline real wrap(real x, real l)
 {
     return x - l * std::rint(x / l);
@@ -218,6 +225,42 @@ inline vec3 wrap_diff(vec3 a, vec3 b, vec3 box_size)
         wrap(a.x - b.x, box_size.x),
         wrap(a.y - b.y, box_size.y),
         wrap(a.z - b.z, box_size.z)
+    );
+}
+
+
+// ------------------------------------------------------------
+// NEW FUNCTIONS: absolute box wrapping
+// Maps positions to [x_min, x_max).
+// Use these after position updates.
+// ------------------------------------------------------------
+
+inline real wrap_box(real x, real x_min, real x_max)
+{
+    real L = x_max - x_min;
+
+    real y = std::fmod(x - x_min, L);
+
+    if(y < R(0.0))
+        y += L;
+
+    return x_min + y;
+}
+
+inline vec2 wrap_box(vec2 v, vec2 box_min, vec2 box_max)
+{
+    return make_vec2(
+        wrap_box(v.x, box_min.x, box_max.x),
+        wrap_box(v.y, box_min.y, box_max.y)
+    );
+}
+
+inline vec3 wrap_box(vec3 v, vec3 box_min, vec3 box_max)
+{
+    return make_vec3(
+        wrap_box(v.x, box_min.x, box_max.x),
+        wrap_box(v.y, box_min.y, box_max.y),
+        wrap_box(v.z, box_min.z, box_max.z)
     );
 }
 
@@ -355,6 +398,55 @@ inline vec3& operator-=(vec3& a, real b)
     return a;
 }
 
+
+inline mat2 operator -(const mat2& m)
+{
+    return make_mat2(
+        -m.m00, -m.m01,
+        -m.m10, -m.m11);
+};
+
+inline mat2 operator+(const mat2& a, const mat2& b)
+{
+    return make_mat2(
+        a.m00 + b.m00, a.m01 + b.m01,
+        a.m10 + b.m10, a.m11 + b.m11
+    );
+};
+
+inline mat2 operator-(const mat2& a, const mat2& b)
+{
+    return make_mat2(
+        a.m00 - b.m00, a.m01 - b.m01,
+        a.m10 - b.m10, a.m11 - b.m11);
+
+};
+
+inline mat2& operator+=(mat2& a, const mat2& b)
+{
+    a.m00 += b.m00;
+    a.m01 += b.m01;
+    a.m10 += b.m10;
+    a.m11 += b.m11;
+    return a;
+};
+
+inline mat2& operator-=(mat2& a, const mat2& b)
+{
+    a.m00 -= b.m00;
+    a.m01 -= b.m01;
+    a.m10 -= b.m10;
+    a.m11 -= b.m11;
+    return a;
+};
+
+
+
+
+// -----------------------------------------------------------------------------
+// scalar * vector, vector * scalar, and their compound assignment variants
+// -----------------------------------------------------------------------------
+
 inline vec2 operator*(const vec2& a, real b)
 {
     return make_vec2(a.x * b, a.y * b);
@@ -375,12 +467,28 @@ inline vec3 operator*(real a, const vec3& b)
     return make_vec3(a * b.x, a * b.y, a * b.z);
 }
 
+inline mat2 operator*(const mat2& m, real b)
+{
+    return make_mat2(
+        m.m00 * b, m.m01 * b,
+        m.m10 * b, m.m11 * b
+    );
+};
+
+inline mat2 operator*(real a, const mat2& m)
+{
+    return make_mat2(
+        m.m00 * a, m.m01 * a,
+        m.m10 * a, m.m11 * a
+    );
+};
+
 inline vec2& operator*=(vec2& a, real b)
 {
     a.x *= b;
     a.y *= b;
     return a;
-}
+};
 
 inline vec3& operator*=(vec3& a, real b)
 {
@@ -388,29 +496,41 @@ inline vec3& operator*=(vec3& a, real b)
     a.y *= b;
     a.z *= b;
     return a;
-}
+};
+
+inline mat2& operator*=(mat2& a, real b)
+{
+    a.m00 *= b;
+    a.m01 *= b;
+    a.m10 *= b;
+    a.m11 *= b;
+    return a;
+};
+
+// -----------------------------------------------------------------------------
+// vector / scalar and matrix / scalar division, and their compound assignment variants
+
 
 inline vec2 operator/(const vec2& a, real b)
 {
     real b_inv = R(1.0) / b;
     return make_vec2(a.x * b_inv, a.y * b_inv);
-}
-
-inline vec2 operator/(real a, const vec2& b)
-{
-    return make_vec2(a / b.x, a / b.y);
-}
+};
 
 inline vec3 operator/(const vec3& a, real b)
 {
     real b_inv = R(1.0) / b;
     return make_vec3(a.x * b_inv, a.y * b_inv, a.z * b_inv);
-}
+};
 
-inline vec3 operator/(real a, const vec3& b)
+inline mat2 operator/(const mat2& m, real b)
 {
-    return make_vec3(a / b.x, a / b.y, a / b.z);
-}
+    return make_mat2(
+        m.m00 / b, m.m01 / b,
+        m.m10 / b, m.m11 / b
+    );
+};
+
 
 inline vec2& operator/=(vec2& a, real b)
 {
@@ -425,7 +545,16 @@ inline vec3& operator/=(vec3& a, real b)
     a.y /= b;
     a.z /= b;
     return a;
-}
+};
+
+inline mat2& operator/=(mat2& a, real b)
+{
+    a.m00 /= b;
+    a.m01 /= b;
+    a.m10 /= b;
+    a.m11 /= b;
+    return a;
+};
 
 // -----------------------------------------------------------------------------
 // vector math
@@ -479,6 +608,151 @@ inline vec3 normalize(const vec3& v)
     real len = length(v);
     return v / len;
 }
+
+inline void eigenvalues_symm(const mat2& m, vec2& lambda)
+{
+    real a = R(0.5) * (m.m00 + m.m11);
+    real b = R(0.5) * (m.m00 - m.m11);
+    real c = m.m01;
+
+    real r = std::hypot(b, c);
+
+    lambda.x = a + r;
+    lambda.y = a - r;
+}
+
+inline void spectral_data_symm(const mat2& m, real& trace, real& det, vec2& lambda)
+{
+    trace = m.m00 + m.m11;
+    det = m.m00 * m.m11 - m.m01 * m.m01;
+
+    real a = R(0.5) * trace;
+    real b = R(0.5) * (m.m00 - m.m11);
+    real c = m.m01;
+
+    real r = std::hypot(b, c);
+
+    lambda.x = a + r;
+    lambda.y = a - r;
+};
+
+inline real trace(const mat2& m)
+{
+    return m.m00 + m.m11;
+};
+
+inline real det(const mat2& m)
+{
+    return m.m00 * m.m11 - m.m01 * m.m10;
+};
+
+inline mat2 cofactor(const mat2& m)
+{
+    return make_mat2(
+        m.m11, -m.m10,
+        -m.m01, m.m00
+    );
+};
+
+inline mat2 adjugate(const mat2& m)
+{
+    return make_mat2(
+        m.m11, -m.m01,
+        -m.m10, m.m00
+    );
+};
+
+inline mat2 inverse_symm(const mat2& m)
+{
+    real det = m.m00 * m.m11 - m.m01 * m.m01;
+    real inv_det = R(1.0) / det;
+
+    return make_mat2(
+         m.m11 * inv_det, -m.m01 * inv_det,
+        -m.m01 * inv_det,  m.m00 * inv_det
+    );
+}
+
+inline mat2 inverse_sqrt_symm(const mat2& m)
+{
+    real det = m.m00 * m.m11 - m.m01 * m.m01;
+    det = std::max(det, R(1e-12));
+
+    real s = std::sqrt(det);
+    real tr = m.m00 + m.m11;
+
+    real norm = std::sqrt(std::max(tr + R(2.0) * s, R(1e-12)));
+
+    // invsqrt(m) = sqrt(tr + 2 sqrt(det)) * inv(m + sqrt(det) I)
+    mat2 q = make_mat2(
+        m.m00 + s, m.m01,
+        m.m01,     m.m11 + s
+    );
+
+    mat2 inv_q = inverse_symm(q);
+
+    return norm * inv_q;
+};
+
+inline mat2 matmul(const mat2& a, const mat2& b)
+{
+    return make_mat2(
+        a.m00 * b.m00 + a.m01 * b.m10, a.m00 * b.m01 + a.m01 * b.m11,
+        a.m10 * b.m00 + a.m11 * b.m10, a.m10 * b.m01 + a.m11 * b.m11
+    );
+};
+
+inline mat2 symmetrize(const mat2& m)
+{
+    real sym_m01 = R(0.5) * (m.m01 + m.m10);
+    return make_mat2(
+        m.m00, sym_m01,
+        sym_m01, m.m11
+    );
+};
+
+inline void symmetrize(mat2& m)
+{
+    real sym_m01 = R(0.5) * (m.m01 + m.m10);
+    m.m01 = sym_m01;
+    m.m10 = sym_m01;
+};
+
+inline mat2 outer(const vec2& a, const vec2& b)
+{
+    return make_mat2(
+        a.x * b.x, a.x * b.y,
+        a.y * b.x, a.y * b.y
+    );
+};
+
+inline mat2 rotate(const mat2& m, real angle)
+{
+    real c = std::cos(angle);
+    real s = std::sin(angle);
+
+    mat2 R = make_mat2(
+        c, -s,
+        s,  c
+    );
+
+    return matmul(R, matmul(m, make_mat2(c, s, -s, c)));
+};
+
+inline void rotate(mat2& m, real angle)
+{
+    real c = std::cos(angle);
+    real s = std::sin(angle);
+
+    mat2 R = make_mat2(
+        c, -s,
+        s,  c
+    );
+
+    m = matmul(R, matmul(m, make_mat2(c, s, -s, c)));
+};
+
+
 
 // -----------------------------------------------------------------------------
 // Gauss-Legendre quadrature on [-1, 1]

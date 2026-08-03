@@ -325,7 +325,10 @@ void segment_to_segment_interaction(
     grad_q2 += LL * dI_q2 + e_j * L_i * I;
 }
 
-
+void multipole_expansion_interaction(real a, int p, vec2 p1, vec2 p2, vec2 q1, vec2 q2, vec2& grad_p1, vec2& grad_p2, vec2& grad_q1, vec2& grad_q2)
+{
+    
+}
 /*
 void segment_to_segment_interaction(
     real strength,
@@ -873,7 +876,7 @@ int main()
     model.scale_gamma(0.25, i0, i1, false);
     model.scale_gamma_l(4.0, i0, i1+1);
 
-    std::ofstream file("output.bin", std::ios::binary);
+    std::ofstream file("dump/output.bin", std::ios::binary);
     for(int step = 0; step < num_steps; step++)
     {
         if(step % 200000 == 0)

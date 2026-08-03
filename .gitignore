@@ -22,3 +22,5 @@ particlefield/data*
 particlefield/logs*
 cracks/data/
 blade_embedding_data.pkl
+*dump/
+microsam/
