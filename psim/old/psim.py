@@ -4,7 +4,7 @@ import triton.language as tl
 import matplotlib.pyplot as plt
 import numpy as np
 from typing import Tuple, Union, List, Optional
-from psim_kernels import neigh_count, neigh_list
+from camilla.psim.old.psim_kernels import neigh_count, neigh_list
 import math
 
 def q_matrices_process_3d(coefs, basis):

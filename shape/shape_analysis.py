@@ -1,5 +1,6 @@
 import numpy as np
 from scipy.ndimage import find_objects
+from scipy.interpolate import RegularGridInterpolator
 from skimage.measure import marching_cubes
 from typing import Optional, Union
 #def labels_get_indices(labels : np.ndarray, exclude_background : bool, add_unravelled_indices : bool) -> dict:
@@ -22,7 +23,7 @@ from typing import Optional, Union
 #        ref += count
 #    return indices_dict
 
-def labels_statistics(labels : np.ndarray, intensity : np.ndarray, spacing : Union[np.ndarray , float, None] = None , add_meshes : bool = False, target_labels : np.ndarray = None) -> tuple:
+def label_statistics(labels : np.ndarray, intensity : np.ndarray, spacing : Union[np.ndarray , float, None] = None , add_meshes : bool = False, target_labels : np.ndarray = None) -> tuple:
     objects = find_objects(labels)
     indices = np.indices(labels.shape)
     num_dimensions = labels.ndim
@@ -66,20 +67,72 @@ def labels_statistics(labels : np.ndarray, intensity : np.ndarray, spacing : Uni
                 target_labels_unique = target_labels_unique[1:]
                 target_labels_counts = target_labels_counts[1:]
         if(add_meshes and num_dimensions == 3):
-            inflated_slices = []
-            for dim, slc in enumerate(slices):
-                start = slc.start - 1 if slc.start > 0 else slc.start
-                stop = slc.stop + 1 if slc.stop < labels.shape[dim] else slc.stop
-                inflated_slices.append(slice(start, stop, None))
-            inflated_slices = tuple(inflated_slices)
-            translation_vector = np.array([s.start for s in slices])*spacing_array
-            inflated_mask = labels[inflated_slices] == label
             try:
-                verts, faces, normals, values = marching_cubes(inflated_mask.astype(np.float32), level=0.5, spacing=spacing_array)
-                verts += translation_vector[None,:]
-                mesh = {'verts': verts, 'faces': faces, 'normals': normals, 'values': values}
+                inflated_slices = []
+                for dim, slc in enumerate(slices):
+                    start = slc.start - 1 if slc.start > 0 else slc.start
+                    stop = slc.stop + 1 if slc.stop < labels.shape[dim] else slc.stop
+                    inflated_slices.append(slice(start, stop, None))
+                inflated_slices = tuple(inflated_slices)
+                inflated_mask = labels[inflated_slices] == label
+                cropped_intensity = intensity[inflated_slices]
+
+                grid = tuple(
+                    np.arange(size, dtype=float) * spacing_array[dim]
+                    for dim, size in enumerate(inflated_mask.shape)
+                )
+
+                verts, faces, normals, _ = marching_cubes(
+                    inflated_mask.astype(np.float32),
+                    level=0.5,
+                    spacing=spacing_array,
+                )
+
+                interpolator = RegularGridInterpolator(
+                    grid,
+                    cropped_intensity,
+                    method="linear",
+                    bounds_error=False,
+                    fill_value=np.nan,
+                )
+
+                interpolated_values = interpolator(verts)
+
+                translation_vector = (
+                    np.array([s.start for s in inflated_slices], dtype=float)
+                    * spacing_array
+                )
+                verts += translation_vector
+
+                mesh = {
+                    "verts": verts,
+                    "faces": faces,
+                    "normals": normals,
+                    "values": interpolated_values,
+                }
             except Exception as e:
                 mesh = None
+        else:
+            mesh = None
+
+
+            #translation_vector = np.array([s.start for s in slices])*spacing_array
+            #inflated_mask = labels[inflated_slices] == label
+            #try:
+            #    ii, jj, kk = np.indices(inflated_mask.shape)
+            #    ii = ii*spacing_array[0]
+            #    jj = jj*spacing_array[1]
+            #    kk = kk*spacing_array[2]
+            #    
+            #    verts, faces, normals, values = marching_cubes(inflated_mask.astype(np.float32), level=0.5, spacing=spacing_array)
+            #    interpolator = RegularGridInterpolator((ii[:,0,0], jj[0,:,0], kk[0,0,:]), intensity[inflated_slices], method='linear', bounds_error=False)
+            #    interpolated_values = interpolator(verts)
+            #    values = interpolated_values
+            #    verts += translation_vector[None,:]
+#
+            #    mesh = {'verts': verts, 'faces': faces, 'normals': normals, 'values': values}
+            #except Exception as e:
+            #    mesh = None
         result_dict = {'moment0': moment0, 'moment1': moment1, 'moment2': moment2, 'wmoment0': wmoment0, 'wmoment1': wmoment1, 'wmoment2': wmoment2}
         if(add_meshes and num_dimensions == 3):
             result_dict['mesh'] = mesh

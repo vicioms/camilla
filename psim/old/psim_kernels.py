@@ -1,10 +1,6 @@
-from networkx import sigma
 import torch
 import triton
 import triton.language as tl
-
-
-
 
 @triton.jit
 def _neigh_count(
@@ -79,9 +75,9 @@ def _neigh_count(
                     dz = z_i - z_j
 
                     if USE_PBC:
-                        dx = dx - Lx * tl.round(dx / Lx)
-                        dy = dy - Ly * tl.round(dy / Ly)
-                        dz = dz - Lz * tl.round(dz / Lz)
+                        dx = dx - Lx * tl.floor(dx / Lx)
+                        dy = dy - Ly * tl.floor(dy / Ly)
+                        dz = dz - Lz * tl.floor(dz / Lz)
 
                     r2 = dx*dx + dy*dy + dz*dz
 
@@ -170,9 +166,9 @@ def _neigh_list(
                     dy = y_i - y_j
                     dz = z_i - z_j
                     if USE_PBC:
-                        dx = dx - Lx * tl.round(dx / Lx)
-                        dy = dy - Ly * tl.round(dy / Ly)
-                        dz = dz - Lz * tl.round(dz / Lz)
+                        dx = dx - Lx * tl.floor(dx / Lx)
+                        dy = dy - Ly * tl.floor(dy / Ly)
+                        dz = dz - Lz * tl.floor(dz / Lz)
 
                     r2 = dx*dx + dy*dy + dz*dz
                     valid = (
@@ -197,9 +193,7 @@ def neigh_count(
     num_cells_per_dim,
     box_size,
     cutoff_skin,
-    neigh_count,
-    neigh_count_offsets,
-    neigh_list,
+    neigh_counts,
     ring=1,
     use_pbc=True,
     block_j=64
@@ -207,8 +201,7 @@ def neigh_count(
     assert pos.is_contiguous()
     assert cell_ids.is_contiguous()
     assert cell_offsets.is_contiguous()
-    assert neigh_count_offsets.is_contiguous()
-    assert neigh_list.is_contiguous()
+    assert neigh_counts.is_contiguous()
 
     num_particles = pos.shape[0]
     nx, ny, nz = num_cells_per_dim
@@ -224,12 +217,11 @@ def neigh_count(
         nx=nx, ny=ny, nz=nz,
         Lx=Lx, Ly=Ly, Lz=Lz,
         cutoff_skin2=cutoff_skin2,
-        neigh_counts_ptr=neigh_count,
+        neigh_counts_ptr=neigh_counts,
         RING=ring,
         USE_PBC=use_pbc,
         BLOCK_J=block_j
     )
-    
     
 def neigh_list(
     pos,
@@ -463,9 +455,6 @@ def _pairwise_kernel(pos_ptr,
     tl.store(force_ptr + base_i + 1, fy)
     tl.store(force_ptr + base_i + 2, fz)
     
-
-
-
 def pairwise_kernel_tlj(pos,
                         force,
                         cell_ids,
@@ -503,7 +492,6 @@ def pairwise_kernel_tlj(pos,
         USE_PBC=1,
         BLOCK_J=block_j
     )
-
 
 def pairwise_kernel_tmorse(pos,
                         force,

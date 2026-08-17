@@ -73,7 +73,7 @@ class ConvPatchEncoder1d(nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         if x.dim() != 4:
-            raise ValueError("Input tensor must be 4D (B, N, C,  L)")
+            raise ValueError("Input tensor must be 4D (B, N, C, L)")
         B, N, C, L = x.shape
         x = rearrange(x, 'b n c l -> (b n) c l')
         x = self.net(x)

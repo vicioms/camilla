@@ -43,3 +43,6 @@ $$ \lambda_\ell c_{\ell} e^{-\lambda_{\ell} \tau} + \nu -\nu c_\ell e^{-\lambda_
 yielding:
 
 $$ 1 - \frac{\lambda}{\nu} = K  e^{-\lambda b} $$
+
+
+

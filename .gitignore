@@ -1,3 +1,5 @@
+misc/knee_data/
+misc/weights/
 bullshit/
 build/
 .vscode/
@@ -13,6 +15,7 @@ particles/particles.txt
 videos/
 earthquakes/STEAD/
 earthquakes/gps/IGS20_24h_final/
+earthquakes/catalogs/
 folderer/ml/checkpoints/
 folderer/meshes/
 folderer/local_data/
@@ -24,3 +27,5 @@ cracks/data/
 blade_embedding_data.pkl
 *dump/
 microsam/
+landsat/
+trains/
