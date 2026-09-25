@@ -1,13 +1,273 @@
 import torch
-from torch.utils.data import Dataset
+from torch.utils.data import Dataset, IterableDataset
 import h5py
 import numpy as np
 import pandas as pd
-from obspy import UTCDateTime
+
+from obspy import UTCDateTime, Stream
 from obspy.clients.fdsn import Client
+from obspy.clients.fdsn.header import FDSNNoDataException
+
 from pathlib import Path
-from typing import List, Tuple, Optional, Union
 from datetime import datetime
+from typing import Union, List, Optional, Tuple, Any
+
+
+class OnlineWaveformDataset(Dataset):
+    def __init__(
+        self,
+        client: Any,
+        channels: Union[str, List[str]] = ("HH?", "BH?"),
+    ):
+        if isinstance(client, str):
+            self.client = Client(client)
+        else:
+            self.client = client
+
+        self.channels = self._format_channels(channels)
+
+    @staticmethod
+    def _format_channels(
+        channels: Union[str, List[str]],
+    ) -> str:
+        if isinstance(channels, str):
+            return channels
+
+        return ",".join(channels)
+
+    def get_client(self):
+        return self.client
+
+    def get_stations(
+        self,
+        min_longitude: float,
+        max_longitude: float,
+        min_latitude: float,
+        max_latitude: float,
+        start_time: UTCDateTime,
+        end_time: UTCDateTime,
+        channels: Optional[Union[str, List[str]]] = None,
+    ):
+        channels = (
+            self.channels
+            if channels is None
+            else self._format_channels(channels)
+        )
+
+        inventory = self.client.get_stations(
+            minlongitude=min_longitude,
+            maxlongitude=max_longitude,
+            minlatitude=min_latitude,
+            maxlatitude=max_latitude,
+            channel=channels,
+            starttime=start_time,
+            endtime=end_time,
+            level="channel",
+        )
+
+        metadata = {}
+
+        for network in inventory:
+            for station in network:
+                key = (network.code, station.code)
+
+                metadata[key] = {
+                    "latitude": station.latitude,
+                    "longitude": station.longitude,
+                    "elevation": station.elevation,
+                    "site_name": getattr(station.site, "name", None),
+                    "channels": [
+                        {
+                            "code": channel.code,
+                            "location": channel.location_code,
+                            "sample_rate": channel.sample_rate,
+                        }
+                        for channel in station.channels
+                    ],
+                }
+
+        return metadata
+
+    @staticmethod
+    def select_channels(
+        station_metadata,
+        priorities=("HH", "BH"),
+    ):
+        """
+        Select a single complete three-component channel set.
+
+        Preference
+        ----------
+        HHZ, HHN, HHE
+        HHZ, HH1, HH2
+        BHZ, BHN, BHE
+        BHZ, BH1, BH2
+
+        All components must have:
+            - the same location code
+            - the same sample rate
+
+        Returns
+        -------
+        dict or None
+        """
+
+        channels = station_metadata["channels"]
+
+        for prefix in priorities:
+            locations = sorted({
+                channel["location"]
+                for channel in channels
+                if channel["code"].startswith(prefix)
+            })
+
+            for location in locations:
+                available = {
+                    channel["code"]: channel
+                    for channel in channels
+                    if (
+                        channel["location"] == location
+                        and channel["code"].startswith(prefix)
+                    )
+                }
+
+                component_sets = (
+                    ("Z", "N", "E"),
+                    ("Z", "1", "2"),
+                )
+
+                for components in component_sets:
+                    desired = [
+                        f"{prefix}{component}"
+                        for component in components
+                    ]
+
+                    if not all(
+                        code in available
+                        for code in desired
+                    ):
+                        continue
+
+                    sample_rates = [
+                        available[code]["sample_rate"]
+                        for code in desired
+                    ]
+
+                    if not np.allclose(
+                        sample_rates,
+                        sample_rates[0],
+                    ):
+                        continue
+
+                    return {
+                        "location": location,
+                        "channels": desired,
+                        "components": components,
+                        "sample_rate": sample_rates[0],
+                    }
+
+        return None
+
+    def get_waveforms_in_box(
+        self,
+        box: Tuple[float, float, float, float],
+        start_time: UTCDateTime,
+        end_time: UTCDateTime,
+        channels: Optional[Union[str, List[str]]] = None,
+    ):
+        """
+        Retrieve preferred three-component waveforms from all
+        suitable stations in a geographic box.
+
+        Parameters
+        ----------
+        box
+            (
+                min_longitude,
+                max_longitude,
+                min_latitude,
+                max_latitude,
+            )
+
+        start_time
+            Start of waveform window.
+
+        end_time
+            End of waveform window.
+
+        channels
+            Optional channel query overriding self.channels.
+
+        Returns
+        -------
+        stream : obspy.Stream
+            Combined waveform stream.
+
+        metadata : dict
+            Metadata for stations for which a valid three-component
+            channel set was identified.
+        """
+
+        (
+            min_longitude,
+            max_longitude,
+            min_latitude,
+            max_latitude,
+        ) = box
+
+        metadata = self.get_stations(
+            min_longitude=min_longitude,
+            max_longitude=max_longitude,
+            min_latitude=min_latitude,
+            max_latitude=max_latitude,
+            start_time=start_time,
+            end_time=end_time,
+            channels=channels,
+        )
+
+        bulk = []
+        selected_metadata = {}
+
+        for (network, station), station_metadata in metadata.items():
+            selected = self.select_channels(
+                station_metadata
+            )
+
+            if selected is None:
+                continue
+
+            location = selected["location"]
+
+            selected_metadata[(network, station)] = {
+                **station_metadata,
+                "selected": selected,
+            }
+
+            for channel in selected["channels"]:
+                bulk.append((
+                    network,
+                    station,
+                    location,
+                    channel,
+                    start_time,
+                    end_time,
+                ))
+
+        if len(bulk) == 0:
+            return Stream(), selected_metadata
+
+        try:
+            stream = self.client.get_waveforms_bulk(
+                bulk
+            )
+
+        except FDSNNoDataException:
+            stream = Stream()
+
+        return stream, selected_metadata
+
+    #def set_catalog(self, longitudes, latitudes, times, magnitudes):
+        
 
 class SteadDataset(Dataset):
     def __init__(self, chunk_files, channel_first):

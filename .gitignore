@@ -5,11 +5,13 @@ build/
 .vscode/
 *pycache*
 .ipynb_checkpoints/
-local_files/
+*local_files*
 *.o
+*.cu
 *.bin
 *.nd2
 *.tif
+*.zip
 particles/movies/
 particles/particles.txt
 videos/
@@ -29,3 +31,8 @@ blade_embedding_data.pkl
 microsam/
 landsat/
 trains/
+proposal_espci/
+cells/GSE114397/
+retina/data/SwitchingTrap/
+language/datasets/*
+*.arrow
